@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-jenkins'
+        SCANNER_HOME = tool 'sonar'
         DOCKER_NAME  = 'rakesh6nm/cartservice'
         IMAGE_NAME   = 'cartservice'
     }
