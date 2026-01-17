@@ -156,28 +156,30 @@ pipeline {
     post {
         always {
             script {
-                withCredentials([usernamePassword(credentialsId: 'gmail-creds', usernameVariable: 'SMTP_USER', passwordVariable: 'SMTP_PASS')]) {
-                    emailext (
-                        subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        mimeType: 'text/html',
-                        body: """
-                        <h3>Cartservice DevSecOps Pipeline</h3>
-                        <p><b>Status:</b> ${currentBuild.currentResult}</p>
-                        <p><b>Job:</b> ${env.JOB_NAME}</p>
-                        <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
-                        <p><a href="${env.BUILD_URL}">Build Logs</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: SMTP_USER,
-                        smtpUsername: SMTP_USER,
-                        smtpPassword: SMTP_PASS,
-                        attachmentsPattern: '''
-                        src/cartservice/dependency-check-report/dependency-check-report.html,
-                        src/cartservice/trivy-fs-report.txt,
-                        trivy-image-cart.txt,
-                        trivy-image-cart.json
-                        '''
-                    )
+                try {
+                    withCredentials([usernamePassword(credentialsId: 'gmail-creds', usernameVariable: 'SMTP_USER', passwordVariable: 'SMTP_PASS')]) {
+                        emailext (
+                            subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                            mimeType: 'text/html',
+                            body: """
+                            <h3>Cartservice DevSecOps Pipeline</h3>
+                            <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                            <p><b>Job:</b> ${env.JOB_NAME}</p>
+                            <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
+                            <p><a href="${env.BUILD_URL}">Build Logs</a></p>
+                            """,
+                            to: 'jharakesh485@gmail.com',
+                            from: SMTP_USER,
+                            attachmentsPattern: '''
+                            src/cartservice/dependency-check-report/dependency-check-report.html,
+                            src/cartservice/trivy-fs-report.txt,
+                            trivy-image-cart.txt,
+                            trivy-image-cart.json
+                            '''
+                        )
+                    }
+                } catch (err) {
+                    echo "⚠️ Email failed, but pipeline will not fail: ${err}"
                 }
             }
         }
