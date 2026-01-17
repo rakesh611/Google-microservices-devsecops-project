@@ -32,7 +32,9 @@ pipeline {
                 dir('src/cartservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh '''
-                        dotnet tool install --global dotnet-sonarscanner || true
+                        if ! command -v dotnet-sonarscanner &> /dev/null; then
+                            dotnet tool install --global dotnet-sonarscanner
+                        fi
                         export PATH="$PATH:$HOME/.dotnet/tools"
 
                         dotnet sonarscanner begin \
@@ -52,7 +54,7 @@ pipeline {
         stage("Quality Gate") {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: false
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
@@ -117,14 +119,14 @@ pipeline {
         // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
-                dir('src/cartservice/src') {
+                dir('src/cartservice') {
                     sh "docker build -t ${FULL_IMAGE} ."
                 }
             }
         }
 
         // ---------- Docker Push ----------
-        stage("Build & Push Docker Image") {
+        stage("Push Docker Image") {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
@@ -151,5 +153,4 @@ pipeline {
             }
         }
     }
-
- 
+}
