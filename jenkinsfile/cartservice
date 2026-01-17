@@ -26,7 +26,7 @@ pipeline {
             }
         }
 
-        // ---------- SAST : SonarQube ----------
+        // ---------- SonarQube ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/cartservice') {
@@ -118,9 +118,7 @@ pipeline {
         stage("Build Docker Image") {
             steps {
                 dir('src/cartservice/src') {
-                    sh '''
-                    docker build -t ${FULL_IMAGE} .
-                    '''
+                    sh "docker build -t ${FULL_IMAGE} ."
                 }
             }
         }
@@ -129,10 +127,7 @@ pipeline {
         stage("Build & Push Docker Image") {
             steps {
                 script {
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'dockerhub1'
-                    ) {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                         def img = docker.image("${FULL_IMAGE}")
                         img.push()
                         img.push("latest")
@@ -145,11 +140,8 @@ pipeline {
         stage("Trivy Image Scan") {
             steps {
                 sh '''
-                trivy image ${FULL_IMAGE} \
-                  -f table -o trivy-image-cart.txt || true
-
-                trivy image ${FULL_IMAGE} \
-                  -f json -o trivy-image-cart.json || true
+                trivy image ${FULL_IMAGE} -f table -o trivy-image-cart.txt || true
+                trivy image ${FULL_IMAGE} -f json -o trivy-image-cart.json || true
                 '''
             }
             post {
@@ -163,24 +155,31 @@ pipeline {
     // ---------- Email Notification ----------
     post {
         always {
-            emailext (
-                subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                mimeType: 'text/html',
-                body: """
-                <h3>Cartservice DevSecOps Pipeline</h3>
-                <p><b>Status:</b> ${currentBuild.currentResult}</p>
-                <p><b>Job:</b> ${env.JOB_NAME}</p>
-                <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
-                <p><a href="${env.BUILD_URL}">Build Logs</a></p>
-                """,
-                to: 'jharakesh485@gmail.com',
-                attachmentsPattern: '''
-                src/cartservice/dependency-check-report/dependency-check-report.html,
-                src/cartservice/trivy-fs-report.txt,
-                trivy-image-cart.txt,
-                trivy-image-cart.json
-                '''
-            )
+            script {
+                withCredentials([usernamePassword(credentialsId: 'gmail-creds', usernameVariable: 'SMTP_USER', passwordVariable: 'SMTP_PASS')]) {
+                    emailext (
+                        subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        mimeType: 'text/html',
+                        body: """
+                        <h3>Cartservice DevSecOps Pipeline</h3>
+                        <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                        <p><b>Job:</b> ${env.JOB_NAME}</p>
+                        <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
+                        <p><a href="${env.BUILD_URL}">Build Logs</a></p>
+                        """,
+                        to: 'jharakesh485@gmail.com',
+                        from: SMTP_USER,
+                        smtpUsername: SMTP_USER,
+                        smtpPassword: SMTP_PASS,
+                        attachmentsPattern: '''
+                        src/cartservice/dependency-check-report/dependency-check-report.html,
+                        src/cartservice/trivy-fs-report.txt,
+                        trivy-image-cart.txt,
+                        trivy-image-cart.json
+                        '''
+                    )
+                }
+            }
         }
     }
 }
