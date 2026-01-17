@@ -3,119 +3,87 @@ pipeline {
 
     tools {
         jdk 'jdk21'
-        
     }
 
     environment {
-        
-        DOCKER_NAME  = 'rakesh6nm/adservice'
-        IMAGE_NAME   = 'adservice'
+        DOCKER_REPO = 'rakesh6nm'
+        IMAGE_NAME  = 'adservice'
+        IMAGE_FULL  = "${DOCKER_REPO}/${IMAGE_NAME}"
     }
 
     stages {
-        stage("Clean Workspace") {
-            steps { cleanWs() }
-        }
 
-        stage("Git Checkout") {
+        stage('Checkout SCM') {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                checkout scm
             }
         }
 
-
-
-
-        // --- Trivy FS Scan ---
-        stage("Trivy File Scan") {
+        stage('Trivy FS Scan') {
             steps {
                 dir('src/adservice') {
                     sh '''
-                    trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
+                    trivy fs . \
+                      --severity CRITICAL,HIGH \
+                      --scanners vuln,misconfig,secret \
+                      --format table \
+                      --output trivy-fs-report.txt
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/adservice/trivy-fs-report.txt'
+                    archiveArtifacts artifacts: 'src/adservice/trivy-fs-report.txt', fingerprint: true
                 }
             }
         }
 
-        // --- Build Docker Image ---
-        stage("Build Docker Image") {
+        stage('Build Docker Image') {
             steps {
                 dir('src/adservice') {
                     script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
-                        sh "docker build -t $IMAGE_NAME ."
-                        sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
-                    }
-                }
-            }
-        }
-
-        // --- Push Docker Image ---
-        stage("Push to DockerHub") {
-            steps {
-                dir('src/adservice') {
-                    withCredentials([string(credentialsId: 'dockerhub1', variable: 'dockerpwd')]) {
+                        env.IMAGE_TAG = "${IMAGE_FULL}:${BUILD_NUMBER}"
                         sh '''
-                        docker login -u rakesh6nm -p ${dockerpwd}
-                        docker push ${IMAGE_TAG}
-                        docker tag ${IMAGE_NAME} ${DOCKER_NAME}:latest
-                        docker push ${DOCKER_NAME}:latest
+                        docker build -t ${IMAGE_TAG} .
+                        docker tag ${IMAGE_TAG} ${IMAGE_FULL}:latest
                         '''
                     }
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
-        // stage("Trivy Scan Image") {
-        //     steps {
-        //         dir('src/adservice') {
-        //             sh '''
-        //             trivy image -f json -o trivy-image-ad.json ${IMAGE_TAG}
-        //             trivy image -f table -o trivy-image-ad.txt ${IMAGE_TAG}
-        //             '''
-        //         }
-        //     }
-        //     post {
-        //         always {
-        //             archiveArtifacts 'src/adservice/trivy-image-ad.*'
-        //         }
-        //     }
-        // }
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([string(credentialsId: 'dockerhub1', variable: 'DOCKER_PWD')]) {
+                    sh '''
+                    echo "$DOCKER_PWD" | docker login -u rakesh6nm --password-stdin
+                    docker push ${IMAGE_TAG}
+                    docker push ${IMAGE_FULL}:latest
+                    '''
+                }
+            }
+        }
     }
 
-    // --- Final Notifications ---
     post {
         always {
-            dir('src/adservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>Adservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
+            script {
+                if (fileExists('src/adservice')) {
+                    emailext(
+                        subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                         mimeType: 'text/html',
-                        attachmentsPattern: 'dependency-check-report.xml,trivy-fs-report.txt,trivy-image-ad.json,trivy-image-ad.txt'
+                        to: 'jharakesh485@gmail.com',
+                        body: """
+                        <h3>Adservice DevSecOps Pipeline</h3>
+                        <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                        <p><b>Job:</b> ${env.JOB_NAME}</p>
+                        <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
+                        <p><b>URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                        """,
+                        attachmentsPattern: 'src/adservice/trivy-fs-report.txt'
                     )
                 }
             }
         }
     }
 }
-
