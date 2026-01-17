@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     tools {
-        // .NET SDK should be installed in Jenkins global tools config
         dotnetsdk 'dotnet9'
     }
 
@@ -10,20 +9,23 @@ pipeline {
         SCANNER_HOME = tool 'sonar'
         DOCKER_NAME  = 'rakesh6nm/cartservice'
         IMAGE_NAME   = 'cartservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
     }
 
     stages {
+
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main',
+                url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
-        // --- SAST: SonarQube for C# ---
+        // ---------- SAST : SonarQube ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/cartservice') {
@@ -32,76 +34,77 @@ pipeline {
                         dotnet tool install --global dotnet-sonarscanner || true
                         export PATH="$PATH:$HOME/.dotnet/tools"
 
-                        dotnet sonarscanner begin /k:"cartservice" /d:sonar.host.url=$SONAR_HOST_URL /d:sonar.login=$SONAR_AUTH_TOKEN
+                        dotnet sonarscanner begin \
+                          /k:"cartservice" \
+                          /d:sonar.host.url=$SONAR_HOST_URL \
+                          /d:sonar.login=$SONAR_AUTH_TOKEN
+
                         dotnet build
-                        dotnet sonarscanner end /d:sonar.login=$SONAR_AUTH_TOKEN
+
+                        dotnet sonarscanner end \
+                          /d:sonar.login=$SONAR_AUTH_TOKEN
                         '''
                     }
                 }
             }
         }
 
-        // --- Quality Gate ---
         stage("Quality Gate") {
             steps {
-                dir('src/cartservice') {
-                    script {
-                        timeout(time: 10, unit: 'MINUTES') {
-                            try {
-                                waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
-                            } catch (Exception e) {
-                                echo "Quality Gate failed but continuing for development: ${e.message}"
-                                // Uncomment below line to make it non-blocking
-                                // currentBuild.result = 'UNSTABLE'
-                            }
-                        }
-                    }
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
                 }
             }
         }
-        // --- Build & Unit Tests ---
+
+        // ---------- Build & Test ----------
         stage("Build & Test") {
             steps {
                 dir('src/cartservice/src') {
                     sh '''
                     dotnet restore
                     dotnet build --no-incremental
-                    dotnet test --logger:trx
+                    dotnet test
                     '''
                 }
             }
         }
 
-        // --- Dependency Check (SCA) ---
+        // ---------- Dependency Check (SCA) ----------
         stage("Dependency Check") {
             steps {
                 dir('src/cartservice') {
-                    dependencyCheck additionalArguments: ''' 
-                        --scan ./ 
+                    dependencyCheck(
+                        odcInstallation: 'dp-check',
+                        additionalArguments: '''
+                        --scan .
                         --out dependency-check-report
                         --format ALL
                         --exclude **/bin/**
                         --exclude **/obj/**
                         --exclude **/.sonarqube/**
-                        --format XML 
-                        --out dependency-check-report.xml 
-                    ''',
-                    odcInstallation: 'dp-check'
+                        '''
+                    )
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'dependency-check-report/**', fingerprint: true
+                    archiveArtifacts artifacts: 'src/cartservice/dependency-check-report/**', fingerprint: true
                 }
             }
         }
 
-        // --- Trivy FS Scan ---
+        // ---------- Trivy File Scan ----------
         stage("Trivy File Scan") {
             steps {
                 dir('src/cartservice') {
                     sh '''
-                    trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
+                    trivy fs . \
+                      --severity HIGH,CRITICAL \
+                      --scanners vuln,misconfig,secret \
+                      --exit-code 0 \
+                      --format table \
+                      -o trivy-fs-report.txt
                     '''
                 }
             }
@@ -112,81 +115,73 @@ pipeline {
             }
         }
 
-        // --- Build Docker Image ---
+        // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/cartservice/src') {
-                    script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
-                        sh "docker build -t $IMAGE_NAME ."
-                        
-                    }
+                    sh '''
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    '''
                 }
             }
         }
-        stage('Build & Push Docker Image') {
+
+        // ---------- Docker Push ----------
+        stage("Build & Push Docker Image") {
             steps {
                 script {
                     docker.withRegistry(
                         'https://index.docker.io/v1/',
                         'dockerhub1'
                     ) {
-                        def img = docker.build("${IMAGE_NAME}:${IMAGE_TAG}")
+                        def img = docker.image("${IMAGE_NAME}:${IMAGE_TAG}")
                         img.push()
                         img.push("latest")
                     }
                 }
             }
         }
-        // --- Push Docker Image ---
 
-
-        // --- Trivy Image Scan ---
-        stage("Trivy Scan Image") {
+        // ---------- Trivy Image Scan ----------
+        stage("Trivy Image Scan") {
             steps {
-                dir('src/cartservice') {
                 sh '''
-                trivy image -f json -o trivy-image-cart.json ${IMAGE_TAG}
-                trivy image -f table -o trivy-image-cart.txt ${IMAGE_TAG}
+                trivy image ${IMAGE_NAME}:${IMAGE_TAG} \
+                  -f table -o trivy-image-cart.txt || true
+
+                trivy image ${IMAGE_NAME}:${IMAGE_TAG} \
+                  -f json -o trivy-image-cart.json || true
                 '''
-            }
             }
             post {
                 always {
-                    archiveArtifacts 'src/cartservice/trivy-image-cart.txt'
-                    archiveArtifacts 'src/cartservice/trivy-image-cart.json'
+                    archiveArtifacts 'trivy-image-cart.txt,trivy-image-cart.json'
                 }
             }
         }
     }
 
-    // --- Final Notifications ---
+    // ---------- Email Notification ----------
     post {
         always {
-            dir('src/cartservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>Cartservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-cart.json,trivy-image-cart.txt,dependency-check-report.xml'
-                    )
-                }
-            }
+            emailext (
+                subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                mimeType: 'text/html',
+                body: """
+                <h3>Cartservice DevSecOps Pipeline</h3>
+                <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                <p><b>Job:</b> ${env.JOB_NAME}</p>
+                <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
+                <p><a href="${env.BUILD_URL}">Build Logs</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                attachmentsPattern: '''
+                src/cartservice/dependency-check-report/dependency-check-report.html,
+                src/cartservice/trivy-fs-report.txt,
+                trivy-image-cart.txt,
+                trivy-image-cart.json
+                '''
+            )
         }
     }
-} 
-
+}
