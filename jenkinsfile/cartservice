@@ -78,6 +78,11 @@ pipeline {
                 dir('src/cartservice') {
                     dependencyCheck additionalArguments: ''' 
                         --scan ./ 
+                        --out dependency-check-report
+                        --format ALL
+                        --exclude **/bin/**
+                        --exclude **/obj/**
+                        --exclude **/.sonarqube/**
                         --format XML 
                         --out dependency-check-report.xml 
                     ''',
@@ -86,7 +91,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts 'src/cartservice/dependency-check-report.xml'
+                    archiveArtifacts artifacts: 'dependency-check-report/**', fingerprint: true
                 }
             }
         }
