@@ -1,22 +1,17 @@
-# ------------------ BUILD STAGE ------------------
-FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS builder
+# ---------------- BUILD STAGE ----------------
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
 WORKDIR /app
 
 COPY cartservice.csproj .
-RUN dotnet restore cartservice.csproj -r linux-musl-x64
+RUN dotnet restore cartservice.csproj
 
 COPY . .
 RUN dotnet publish cartservice.csproj \
     -c Release \
-    -r linux-musl-x64 \
-    --self-contained true \
-    -p:PublishSingleFile=true \
-    -p:PublishTrimmed=true \
-    -p:TrimMode=Link \
     -o /cartservice \
     --no-restore
 
-# ------------------ RUNTIME STAGE ------------------
+# ---------------- RUNTIME STAGE ----------------
 FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-alpine AS runtime
 WORKDIR /app
 
@@ -29,11 +24,10 @@ ENV DOTNET_EnableDiagnostics=0 \
 USER 1000
 ENTRYPOINT ["/app/cartservice"]
 
-# ------------------ GRPC HEALTH PROBE ------------------
+# ---------------- GRPC HEALTH PROBE ----------------
 USER root
 ENV GRPC_HEALTH_PROBE_VERSION=v0.4.18
 RUN wget -qO /bin/grpc_health_probe \
     https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
     chmod +x /bin/grpc_health_probe
-
 USER 1000
