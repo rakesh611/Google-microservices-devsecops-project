@@ -16,7 +16,9 @@ pipeline {
     stages {
 
         stage("Clean Workspace") {
-            steps { cleanWs() }
+            steps {
+                cleanWs()
+            }
         }
 
         stage("Git Checkout") {
@@ -72,19 +74,23 @@ pipeline {
 
         // ---------- Dependency Check (SCA) ----------
         stage("Dependency Check") {
+            environment {
+                NVD_API_KEY = credentials('nvd-api-key')
+            }
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     dir('src/cartservice') {
                         dependencyCheck(
                             odcInstallation: 'dp-check',
-                            additionalArguments: '''
+                            additionalArguments: """
                             --scan .
                             --out dependency-check-report
                             --format HTML
+                            --nvdApiKey ${NVD_API_KEY}
                             --exclude **/bin/**
                             --exclude **/obj/**
                             --exclude **/.sonarqube/**
-                            '''
+                            """
                         )
                     }
                 }
