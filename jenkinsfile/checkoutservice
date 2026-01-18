@@ -177,19 +177,14 @@ pipeline {
                 }
             }
         }
-        stage("Tag & Push to DockerHub") {
+        // ---------- Docker Push ----------
+        stage("Build & Push Docker Image") {
             steps {
-                dir('src/checkoutservice') {
-                    script {
-                        withCredentials([string(credentialsId: 'docker-cred', variable: 'dockerpwd')]) {
-                            sh "docker login -u harishnshetty -p ${dockerpwd}"
-                            sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
-                            sh "docker push ${env.IMAGE_TAG}"
-
-                            // Also push latest
-                            sh "docker tag $IMAGE_NAME $DOCKER_NAME:latest"
-                            sh "docker push $DOCKER_NAME:latest"
-                        }
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        def img = docker.image("${FULL_IMAGE}")
+                        img.push()
+                        img.push("latest")
                     }
                 }
             }
