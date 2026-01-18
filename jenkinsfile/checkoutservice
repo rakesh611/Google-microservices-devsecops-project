@@ -167,13 +167,13 @@ pipeline {
             steps {
                 dir('src/checkoutservice') {
                     script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
+                        env.IMAGE_TAG = "${FULL_IMAGE}"
 
                         // Optional cleanup
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
+                        sh "docker rmi -f  ${FULL_IMAGE} || true"
 
-                        sh "docker build -t $IMAGE_NAME ."
-                        sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
+                        sh "docker build -t ${FULL_IMAGE} ."
+                        sh "docker tag ${FULL_IMAGE} "
                     }
                 }
             }
