@@ -6,9 +6,10 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar'
-        DOCKER_NAME = 'rakesh6nm/checkoutservice'
-        IMAGE_NAME = 'checkoutservice'
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_USER  = 'rakesh6nm'
+        IMAGE_NAME   = 'currencyservice'
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
         // This is a global definition. We'll ensure it's used correctly below.
         GO_BIN_PATH = '$(go env GOPATH)/bin'
     }
