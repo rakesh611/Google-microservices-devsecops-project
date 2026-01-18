@@ -168,13 +168,11 @@ pipeline {
             steps {
                 dir('src/checkoutservice') {
                     script {
-                        env.IMAGE_TAG = "${FULL_IMAGE}"
 
                         // Optional cleanup
-                        sh "docker rmi -f  ${FULL_IMAGE} || true"
+                        sh "docker rmi -f  rakesh6nm/currencyservice:${BUILD_NUMBER} || true"
 
-                        sh "docker build -t ${FULL_IMAGE} ."
-                        sh "docker tag ${FULL_IMAGE} "
+                        sh "docker build -t rakesh6nm/currencyservice:${BUILD_NUMBER} ."
                     }
                 }
             }
