@@ -198,13 +198,20 @@ pipeline {
                         echo '🔍 Running Trivy scan on ${env.IMAGE_TAG}'
 
                         # JSON report
-                        trivy image -f json -o trivy-image-checkoutservice.json ${env.IMAGE_TAG}
-
+                        trivy image \
+                          --severity HIGH,CRITICAL \
+                          -f json \
+                          -o trivy-image-checkoutservice.json \
+                          ${env.IMAGE_TAG}
                         # Text report
-                        trivy image -f table -o trivy-image-checkoutservice.txt ${env.IMAGE_TAG}
+                        trivy image \
+                          --severity HIGH,CRITICAL \
+                          -f table \
+                          -o trivy-image-checkoutservice.txt \
+                          ${env.IMAGE_TAG}
 
                         # Fail build if HIGH/CRITICAL vulnerabilities found
-                        # trivy image --exit-code 1 --severity HIGH,CRITICAL ${env.IMAGE_TAG} || true
+                        # trivy image --exit-code 1 --severity HIGH,CRITICAL ${env.IMAGE_TAG}
                         """
                     }
                 }
