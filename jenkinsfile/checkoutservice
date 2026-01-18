@@ -6,7 +6,7 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar'
         DOCKER_NAME = 'rakesh6nm/checkoutservice'
         IMAGE_NAME = 'checkoutservice'
         // This is a global definition. We'll ensure it's used correctly below.
@@ -22,7 +22,7 @@ pipeline {
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/---/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
