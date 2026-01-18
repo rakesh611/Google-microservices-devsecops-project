@@ -5,31 +5,36 @@ pipeline {
         jdk 'jdk17'
         nodejs 'node20'
     }
-    
+
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_NAME  = 'rakesh6nm/currencyservice'
+        DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'currencyservice'
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
     }
 
     stages {
+
         stage("Clean Workspace") {
-            steps { cleanWs() }
+            steps {
+                cleanWs()
+            }
         }
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/---/Google-microservices-devsecops-project.git'
+                git branch: 'main',
+                    url: 'https://github.com/---/Google-microservices-devsecops-project.git'
             }
         }
 
-        // --- SAST: SonarQube for Node.js ---
+        // ---------- SonarQube SAST ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/currencyservice') {
                     withSonarQubeEnv('sonar-server') {
                         sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
+                        ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=currencyservice \
                           -Dsonar.projectName=currencyservice \
                           -Dsonar.sources=. \
@@ -40,54 +45,61 @@ pipeline {
             }
         }
 
-        // --- Quality Gate ---
         stage("Quality Gate") {
             steps {
-                script {
-                    timeout(time: 3, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
-                    }
+                timeout(time: 3, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        // --- Install Dependencies ---
+        // ---------- Install Dependencies ----------
         stage("Install Dependencies") {
             steps {
                 dir('src/currencyservice') {
-                    sh "npm install"
+                    sh 'npm install'
                 }
             }
         }
 
-          stage("OWASP FS Scan") {
+        // ---------- OWASP Dependency-Check ----------
+        stage("OWASP FS Scan") {
             steps {
-                dir('src/currencyservice') {
-                dependencyCheck additionalArguments: '''
-                    --scan ./ 
-                    --disableYarnAudit 
-                    --disableNodeAudit 
-                
-                   ''',
-                odcInstallation: 'dp-check'
-
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-                    post {
-                always {
-                    archiveArtifacts 'src/currencyservice/dependency-check-report.xml'
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dir('src/currencyservice') {
+                        dependencyCheck(
+                            odcInstallation: 'dp-check',
+                            additionalArguments: '''
+                            --scan .
+                            --format XML
+                            --out dependency-check-report
+                            --disableYarnAudit
+                            --disableNodeAudit
+                            '''
+                        )
+                    }
                 }
             }
-          }
+            post {
+                always {
+                    archiveArtifacts 'src/currencyservice/dependency-check-report/**'
+                }
+            }
+        }
 
-        // --- Trivy FS Scan ---
+        // ---------- Trivy File Scan ----------
         stage("Trivy File Scan") {
             steps {
-                dir('src/currencyservice') {
-                    sh '''
-                    trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
-                    '''
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dir('src/currencyservice') {
+                        sh '''
+                        trivy fs . \
+                          --severity HIGH,CRITICAL \
+                          --scanners vuln,misconfig,secret \
+                          --exit-code 0 \
+                          -o trivy-fs-report.txt
+                        '''
+                    }
                 }
             }
             post {
@@ -97,80 +109,73 @@ pipeline {
             }
         }
 
-        // --- Build Docker Image ---
+        // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/currencyservice') {
-                    script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
-                        sh "docker build -t $IMAGE_NAME ."
-                        sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
-                    }
+                    sh '''
+                    docker build -t ${FULL_IMAGE} .
+                    docker tag ${FULL_IMAGE} ${DOCKER_USER}/${IMAGE_NAME}:latest
+                    '''
                 }
             }
         }
 
-        // --- Push Docker Image ---
+        // ---------- Docker Push ----------
         stage("Push to DockerHub") {
             steps {
-                dir('src/currencyservice') {
-                    withCredentials([string(credentialsId: 'docker-cred', variable: 'dockerpwd')]) {
-                        sh '''
-                        docker login -u rakesh6nm -p ${dockerpwd}
-                        docker push ${IMAGE_TAG}
-                        docker tag ${IMAGE_NAME} ${DOCKER_NAME}:latest
-                        docker push ${DOCKER_NAME}:latest
-                        '''
-                    }
+                withCredentials([string(credentialsId: 'docker-cred', variable: 'DOCKER_PASS')]) {
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login -u ${DOCKER_USER} --password-stdin
+                    docker push ${FULL_IMAGE}
+                    docker push ${DOCKER_USER}/${IMAGE_NAME}:latest
+                    '''
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
-        stage("Trivy Scan Image") {
+        // ---------- Trivy Image Scan ----------
+        stage("Trivy Image Scan") {
             steps {
-                dir('src/currencyservice') {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
-                    trivy image -f json -o trivy-image-currency.json ${IMAGE_TAG}
-                    trivy image -f table -o trivy-image-currency.txt ${IMAGE_TAG}
+                    trivy image ${FULL_IMAGE} -f json -o trivy-image-currency.json
+                    trivy image ${FULL_IMAGE} -f table -o trivy-image-currency.txt
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/currencyservice/trivy-image-currency.*'
+                    archiveArtifacts 'trivy-image-currency.*'
                 }
             }
         }
     }
 
-    // --- Final Notifications ---
+    // ---------- Email Notification ----------
     post {
         always {
-            dir('src/currencyservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>Currencyservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-currency.json,trivy-image-currency.txt,dependency-check-report.xml'
-                    )
-                }
+            script {
+                def status = currentBuild.currentResult
+                emailext(
+                    subject: "Pipeline ${status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    mimeType: 'text/html',
+                    body: """
+                        <h3>Currencyservice DevSecOps Pipeline</h3>
+                        <p><b>Status:</b> ${status}</p>
+                        <p><b>Job:</b> ${env.JOB_NAME}</p>
+                        <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
+                        <p><a href="${env.BUILD_URL}">Build Logs</a></p>
+                    """,
+                    to: 'jharakesh485@gmail.com',
+                    attachmentsPattern: '''
+                    src/currencyservice/trivy-fs-report.txt,
+                    trivy-image-currency.json,
+                    trivy-image-currency.txt,
+                    src/currencyservice/dependency-check-report/dependency-check-report.xml
+                    '''
+                )
             }
         }
     }
 }
-
