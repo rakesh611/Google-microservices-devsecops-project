@@ -59,7 +59,7 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 dir('src/checkoutservice') {
-                    withSonarQubeEnv('sonar-server') {
+                    withSonarQubeEnv('sonar-jenkins') {
                         sh ''' $SCANNER_HOME/bin/sonar-scanner \\
                             -Dsonar.projectName=checkoutservice \\
                             -Dsonar.projectKey=checkoutservice \\
