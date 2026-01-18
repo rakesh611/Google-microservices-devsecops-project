@@ -6,7 +6,7 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar'
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'currencyservice'
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
