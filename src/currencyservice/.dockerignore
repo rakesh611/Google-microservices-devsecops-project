@@ -1,2 +1,8 @@
-client.js
-node_modules/
+node_modules
+npm-debug.log
+.git
+.gitignore
+coverage
+dependency-check-report
+trivy-image-*.json
+trivy-image-*.txt
