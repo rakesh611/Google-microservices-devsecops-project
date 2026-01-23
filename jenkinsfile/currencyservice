@@ -35,11 +35,11 @@ pipeline {
                 dir('src/currencyservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh '''
-                        ${SCANNER_HOME}/bin/sonar-scanner \
-                          -Dsonar.projectKey=currencyservice \
-                          -Dsonar.projectName=currencyservice \
-                          -Dsonar.sources=. \
-                          -Dsonar.language=js
+                          ${SCANNER_HOME}/bin/sonar-scanner \
+                            -Dsonar.projectKey=currencyservice \
+                            -Dsonar.projectName=currencyservice \
+                            -Dsonar.sources=. \
+                            -Dsonar.language=js
                         '''
                     }
                 }
@@ -71,11 +71,11 @@ pipeline {
                         dependencyCheck(
                             odcInstallation: 'dp-check',
                             additionalArguments: '''
-                            --scan .
-                            --format XML
-                            --out dependency-check-report
-                            --disableYarnAudit
-                            --disableNodeAudit
+                              --scan .
+                              --format XML
+                              --out dependency-check-report
+                              --disableYarnAudit
+                              --disableNodeAudit
                             '''
                         )
                     }
@@ -88,35 +88,14 @@ pipeline {
             }
         }
 
-        // ---------- Trivy File Scan ----------
-        stage("Trivy File Scan") {
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    dir('src/currencyservice') {
-                        sh '''
-                        trivy fs . \
-                          --severity HIGH,CRITICAL \
-                          --scanners vuln,misconfig,secret \
-                          --exit-code 0 \
-                          -o trivy-fs-report.txt
-                        '''
-                    }
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts 'src/currencyservice/trivy-fs-report.txt'
-                }
-            }
-        }
-
         // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/currencyservice') {
                     sh '''
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
+                      echo "Building image: ${FULL_IMAGE}"
+                      docker rmi -f ${FULL_IMAGE} || true
+                      docker build -t ${FULL_IMAGE} .
                     '''
                 }
             }
@@ -134,22 +113,30 @@ pipeline {
                 }
             }
         }
+
         // ---------- Trivy Image Scan ----------
         stage("Trivy Image Scan") {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
-                    trivy image ${FULL_IMAGE} -f json -o trivy-image-currency.json
-                    trivy image ${FULL_IMAGE} -f table -o trivy-image-currency.txt
+                      trivy image ${FULL_IMAGE} \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --format json \
+                        -o trivy-image-currency.json
+
+                      trivy image ${FULL_IMAGE} \
+                        --severity HIGH,CRITICAL \
+                        --format table \
+                        -o trivy-image-currency.txt
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'trivy-image-currency.*'
+                    archiveArtifacts artifacts: 'trivy-image-currency.*', fingerprint: true
                 }
             }
         }
     }
-
 }
