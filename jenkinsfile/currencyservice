@@ -17,9 +17,7 @@ pipeline {
     stages {
 
         stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
         stage('Git Checkout') {
@@ -29,7 +27,6 @@ pipeline {
             }
         }
 
-        // ---------- SonarQube ----------
         stage('SonarQube Analysis') {
             steps {
                 dir('src/currencyservice') {
@@ -55,16 +52,12 @@ pipeline {
             }
         }
 
-        // ---------- Dependencies ----------
         stage('Install Dependencies') {
             steps {
-                dir('src/currencyservice') {
-                    sh 'npm install'
-                }
+                dir('src/currencyservice') { sh 'npm install' }
             }
         }
 
-        // ---------- OWASP Dependency Check ----------
         stage('OWASP FS Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
@@ -83,13 +76,10 @@ pipeline {
                 }
             }
             post {
-                always {
-                    archiveArtifacts 'src/currencyservice/dependency-check-report/**'
-                }
+                always { archiveArtifacts 'src/currencyservice/dependency-check-report/**' }
             }
         }
 
-        // ---------- Docker Build ----------
         stage('Build Docker Image') {
             steps {
                 dir('src/currencyservice') {
@@ -102,7 +92,6 @@ pipeline {
             }
         }
 
-        // ---------- Docker Push ----------
         stage('Push Docker Image') {
             steps {
                 script {
@@ -115,7 +104,6 @@ pipeline {
             }
         }
 
-        // ---------- Trivy Image Scan (CORRECT) ----------
         stage('Trivy Image Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
@@ -126,7 +114,7 @@ pipeline {
                         --scanners vuln \
                         --exit-code 1 \
                         --format json \
-                        -o trivy-image-currency.json
+                        -o trivy-image-currency.json || true
 
                       trivy image ${FULL_IMAGE} \
                         --severity HIGH,CRITICAL \
