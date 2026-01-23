@@ -116,7 +116,7 @@ pipeline {
                 dir('src/currencyservice') {
                     sh '''
                     docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE}
+                    docker build -t ${FULL_IMAGE} .
                     '''
                 }
             }
