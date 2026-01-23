@@ -10,6 +10,7 @@ pipeline {
         SCANNER_HOME = tool 'sonar'
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'currencyservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
