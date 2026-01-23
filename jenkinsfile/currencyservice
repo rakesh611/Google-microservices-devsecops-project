@@ -7,10 +7,10 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar'
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'currencyservice'
-        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
     stages {
@@ -24,7 +24,7 @@ pipeline {
         stage("Git Checkout") {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/---/Google-microservices-devsecops-project.git'
+                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
@@ -32,7 +32,7 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 dir('src/currencyservice') {
-                    withSonarQubeEnv('sonar-server') {
+                    withSonarQubeEnv('sonar-jenkins') {
                         sh '''
                         ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=currencyservice \
@@ -114,8 +114,8 @@ pipeline {
             steps {
                 dir('src/currencyservice') {
                     sh '''
-                    docker build -t ${FULL_IMAGE} .
-                    docker tag ${FULL_IMAGE} ${DOCKER_USER}/${IMAGE_NAME}:latest
+                    docker rmi -f ${FULL_IMAGE} || true
+                    docker build -t ${FULL_IMAGE}
                     '''
                 }
             }
@@ -151,30 +151,4 @@ pipeline {
         }
     }
 
-    // ---------- Email Notification ----------
-    post {
-        always {
-            script {
-                def status = currentBuild.currentResult
-                emailext(
-                    subject: "Pipeline ${status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    mimeType: 'text/html',
-                    body: """
-                        <h3>Currencyservice DevSecOps Pipeline</h3>
-                        <p><b>Status:</b> ${status}</p>
-                        <p><b>Job:</b> ${env.JOB_NAME}</p>
-                        <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
-                        <p><a href="${env.BUILD_URL}">Build Logs</a></p>
-                    """,
-                    to: 'jharakesh485@gmail.com',
-                    attachmentsPattern: '''
-                    src/currencyservice/trivy-fs-report.txt,
-                    trivy-image-currency.json,
-                    trivy-image-currency.txt,
-                    src/currencyservice/dependency-check-report/dependency-check-report.xml
-                    '''
-                )
-            }
-        }
-    }
 }
