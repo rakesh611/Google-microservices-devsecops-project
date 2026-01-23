@@ -18,9 +18,7 @@ pipeline {
 
         // ---------- Clean ----------
         stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
         // ---------- Git ----------
@@ -36,13 +34,9 @@ pipeline {
             steps {
                 dir('src/currencyservice') {
                     withSonarQubeEnv('sonar-jenkins') {
-                        // Use properties file if available, otherwise inline
                         sh """
-                        ${SCANNER_HOME}/bin/sonar-scanner \
-                          -Dsonar.projectKey=currencyservice \
-                          -Dsonar.projectName=currencyservice \
-                          -Dsonar.sources=. \
-                          -Dsonar.language=js
+                          ${SCANNER_HOME}/bin/sonar-scanner \
+                            -Dsonar.projectBaseDir=.
                         """
                     }
                 }
@@ -96,11 +90,10 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 dir('src/currencyservice') {
-                    sh """
-                      echo "Building image ${FULL_IMAGE}"
+                    sh '''
                       docker rmi -f ${FULL_IMAGE} || true
                       docker build -t ${FULL_IMAGE} .
-                    """
+                    '''
                 }
             }
         }
@@ -110,44 +103,37 @@ pipeline {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                        def img = docker.image("${FULL_IMAGE}")
-                        img.push()
-                        img.push("latest")
+                        docker.image("${FULL_IMAGE}").push()
+                        docker.image("${FULL_IMAGE}").push("latest")
                     }
                 }
             }
         }
 
-        // ---------- Trivy Image Scan (FIXED) ----------
+        // ---------- Trivy Image Scan ----------
         stage('Trivy Image Scan') {
             steps {
                 script {
-                    // Run JSON scan and capture exit code
                     def trivyStatus = sh(
-                        script: """
+                        script: '''
                           trivy image ${FULL_IMAGE} \
                             --severity HIGH,CRITICAL \
                             --ignore-unfixed \
                             --scanners vuln \
-                            --exit-code 1 \
                             --format json \
-                            -o trivy-image-currency.json
-                        """,
+                            -o trivy-image-currency.json || true
+
+                          trivy image ${FULL_IMAGE} \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --scanners vuln \
+                            --format table \
+                            -o trivy-image-currency.txt
+                        ''',
                         returnStatus: true
                     )
 
-                    // Always generate human-readable table
-                    sh """
-                      trivy image ${FULL_IMAGE} \
-                        --severity HIGH,CRITICAL \
-                        --ignore-unfixed \
-                        --scanners vuln \
-                        --format table \
-                        -o trivy-image-currency.txt
-                    """
-
-                    // Mark stage UNSTABLE if HIGH/CRITICAL vulnerabilities found
-                    if (trivyStatus == 1) {
+                    if (trivyStatus != 0) {
                         unstable("HIGH or CRITICAL vulnerabilities found by Trivy")
                     }
                 }
@@ -158,5 +144,6 @@ pipeline {
                 }
             }
         }
-    }
+
+    } // stages
 }
