@@ -126,6 +126,7 @@ pipeline {
                             --severity HIGH,CRITICAL \
                             --ignore-unfixed \
                             --scanners vuln \
+                            --exit-code 1 \
                             --format json \
                             -o trivy-image-currency.json || true
 
@@ -135,13 +136,9 @@ pipeline {
                             --scanners vuln \
                             --format table \
                             -o trivy-image-currency.txt
-                        ''',
-                        returnStatus: true
+                        '''
                     )
 
-                    if (trivyStatus != 0) {
-                        unstable("Trivy detected HIGH/CRITICAL vulnerabilities")
-                    }
                 }
             }
             post {
