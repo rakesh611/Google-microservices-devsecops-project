@@ -16,14 +16,12 @@ pipeline {
 
     stages {
 
-        // ---------- Clean ----------
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
 
-        // ---------- Git ----------
         stage('Git Checkout') {
             steps {
                 git branch: 'main',
@@ -41,7 +39,8 @@ pipeline {
                           -Dsonar.projectKey=currencyservice \
                           -Dsonar.projectName=currencyservice \
                           -Dsonar.sources=. \
-                          -Dsonar.language=js
+                          -Dsonar.language=js \
+                          -Dsonar.scm.disabled=true
                         """
                     }
                 }
@@ -116,29 +115,26 @@ pipeline {
             }
         }
 
-        // ---------- Trivy Image Scan (FIXED) ----------
+        // ---------- Trivy Image Scan (CORRECT) ----------
         stage('Trivy Image Scan') {
             steps {
-                script {
-                    def trivyStatus = sh(
-                        script: '''
-                          trivy image ${FULL_IMAGE} \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --scanners vuln \
-                            --exit-code 1 \
-                            --format json \
-                            -o trivy-image-currency.json || true
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh '''
+                      trivy image ${FULL_IMAGE} \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --scanners vuln \
+                        --exit-code 1 \
+                        --format json \
+                        -o trivy-image-currency.json
 
-                          trivy image ${FULL_IMAGE} \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --scanners vuln \
-                            --format table \
-                            -o trivy-image-currency.txt
-                        '''
-                    )
-
+                      trivy image ${FULL_IMAGE} \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --scanners vuln \
+                        --format table \
+                        -o trivy-image-currency.txt
+                    '''
                 }
             }
             post {
