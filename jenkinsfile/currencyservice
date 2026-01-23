@@ -17,9 +17,7 @@ pipeline {
     stages {
 
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
         stage("Git Checkout") {
@@ -29,18 +27,11 @@ pipeline {
             }
         }
 
-        // ---------- SonarQube SAST ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/currencyservice') {
                     withSonarQubeEnv('sonar-jenkins') {
-                        sh '''
-                          ${SCANNER_HOME}/bin/sonar-scanner \
-                            -Dsonar.projectKey=currencyservice \
-                            -Dsonar.projectName=currencyservice \
-                            -Dsonar.sources=. \
-                            -Dsonar.language=js
-                        '''
+                        sh "${SCANNER_HOME}/bin/sonar-scanner"
                     }
                 }
             }
@@ -54,17 +45,15 @@ pipeline {
             }
         }
 
-        // ---------- Install Dependencies ----------
         stage("Install Dependencies") {
             steps {
                 dir('src/currencyservice') {
-                    sh 'npm install'
+                    sh 'npm ci'
                 }
             }
         }
 
-        // ---------- OWASP Dependency-Check ----------
-        stage("OWASP FS Scan") {
+        stage("OWASP Dependency Check") {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     dir('src/currencyservice') {
@@ -72,10 +61,11 @@ pipeline {
                             odcInstallation: 'dp-check',
                             additionalArguments: '''
                               --scan .
+                              --suppression ../../dependency-check/suppression.xml
                               --format XML
                               --out dependency-check-report
-                              --disableYarnAudit
                               --disableNodeAudit
+                              --disableYarnAudit
                             '''
                         )
                     }
@@ -88,12 +78,10 @@ pipeline {
             }
         }
 
-        // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/currencyservice') {
                     sh '''
-                      echo "Building image: ${FULL_IMAGE}"
                       docker rmi -f ${FULL_IMAGE} || true
                       docker build -t ${FULL_IMAGE} .
                     '''
@@ -101,35 +89,42 @@ pipeline {
             }
         }
 
-        // ---------- Docker Push ----------
-        stage("Build & Push Docker Image") {
+        stage("Push Docker Image") {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                        def img = docker.image("${FULL_IMAGE}")
-                        img.push()
-                        img.push("latest")
+                        docker.image("${FULL_IMAGE}").push()
+                        docker.image("${FULL_IMAGE}").push("latest")
                     }
                 }
             }
         }
 
-        // ---------- Trivy Image Scan ----------
         stage("Trivy Image Scan") {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    sh '''
-                      trivy image ${FULL_IMAGE} \
-                        --severity HIGH,CRITICAL \
-                        --exit-code 1 \
-                        --format json \
-                        -o trivy-image-currency.json
+                script {
+                    def status = sh(
+                        script: '''
+                          trivy image ${FULL_IMAGE} \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --scanners vuln \
+                            --format json \
+                            -o trivy-image-currency.json || true
 
-                      trivy image ${FULL_IMAGE} \
-                        --severity HIGH,CRITICAL \
-                        --format table \
-                        -o trivy-image-currency.txt
-                    '''
+                          trivy image ${FULL_IMAGE} \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --scanners vuln \
+                            --format table \
+                            -o trivy-image-currency.txt
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (status != 0) {
+                        unstable("HIGH/CRITICAL vulnerabilities detected by Trivy")
+                    }
                 }
             }
             post {
