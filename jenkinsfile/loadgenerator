@@ -8,20 +8,22 @@ pipeline {
     environment {
         SCANNER_HOME = tool 'sonar'
 
-        // Docker config (ALIGNED WITH FRONTEND)
+        // Docker config (aligned with frontend)
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'loadgenerator'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
 
-        // pip --user path
+        // pip --user binaries
         PATH = "$PATH:/var/lib/jenkins/.local/bin"
     }
 
     stages {
 
         stage("Clean Workspace") {
-            steps { cleanWs() }
+            steps {
+                cleanWs()
+            }
         }
 
         stage("Git Checkout") {
@@ -32,20 +34,29 @@ pipeline {
         }
 
         /* =========================
-           SAST – BANDIT
+           SAST – BANDIT (FIXED)
         ========================= */
         stage("Bandit Security Scan") {
             steps {
                 dir('src/loadgenerator') {
                     sh '''
+                    # Ensure user-installed binaries are available
+                    export PATH="$PATH:$HOME/.local/bin"
+
                     python3 -m pip install --user --upgrade bandit
+
+                    # Sanity check
+                    bandit --version
+
+                    # Run Bandit scan
                     bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/loadgenerator/bandit-report.json'
+                    archiveArtifacts artifacts: 'src/loadgenerator/bandit-report.json',
+                                     allowEmptyArchive: true
                 }
             }
         }
@@ -84,7 +95,10 @@ pipeline {
         stage("Install Dependencies") {
             steps {
                 dir('src/loadgenerator') {
-                    sh 'python3 -m pip install --user -r requirements.txt || true'
+                    sh '''
+                    export PATH="$PATH:$HOME/.local/bin"
+                    python3 -m pip install --user -r requirements.txt || true
+                    '''
                 }
             }
         }
@@ -96,6 +110,8 @@ pipeline {
             steps {
                 dir('src/loadgenerator') {
                     sh '''
+                    export PATH="$PATH:$HOME/.local/bin"
+
                     python3 -m pip install --user safety
                     safety check --full-report --output json > safety-report.json || true
                     '''
@@ -103,7 +119,8 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts 'src/loadgenerator/safety-report.json'
+                    archiveArtifacts artifacts: 'src/loadgenerator/safety-report.json',
+                                     allowEmptyArchive: true
                 }
             }
         }
@@ -125,7 +142,8 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts 'src/loadgenerator/trivy-fs-report.txt'
+                    archiveArtifacts artifacts: 'src/loadgenerator/trivy-fs-report.txt',
+                                     allowEmptyArchive: true
                 }
             }
         }
@@ -146,7 +164,7 @@ pipeline {
         }
 
         /* =========================
-           DOCKER PUSH (FIXED)
+           DOCKER PUSH
         ========================= */
         stage("Push Image to DockerHub") {
             steps {
@@ -178,7 +196,8 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts 'src/loadgenerator/trivy-image-loadgenerator.*'
+                    archiveArtifacts artifacts: 'src/loadgenerator/trivy-image-loadgenerator.*',
+                                     allowEmptyArchive: true
                 }
             }
         }
@@ -192,7 +211,7 @@ pipeline {
             emailext(
                 subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
-                <p><b>LoadGenerator Google-Shop DevSecOps Pipeline</b></p>
+                <p><b>LoadGenerator – Google Shop DevSecOps Pipeline</b></p>
                 <p>Status: ${currentBuild.currentResult}</p>
                 <p>Job: ${env.JOB_NAME}</p>
                 <p>Build: ${env.BUILD_NUMBER}</p>
