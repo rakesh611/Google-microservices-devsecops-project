@@ -1,26 +1,30 @@
-# Use official Node.js image as base
 FROM node:20-alpine
+
+# Create app user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json first for caching
+# Copy package files only
 COPY package*.json ./
 
-# Install dependencies in a single RUN instruction
-# Chaining commands, cleaning up caches, and using alphabetical order
-RUN npm ci --only=production && \
-    npm cache clean --force
+# Install dependencies safely
+RUN npm ci --only=production && npm cache clean --force
 
-# Copy application source code
-COPY . .
+# Copy only source code
+COPY src/ ./src
 
-# Set environment variables (if needed)
+# Change ownership to non-root user
+RUN chown -R appuser:appgroup /usr/src/app
+
+# Switch to non-root user
+USER appuser
+
+# Set environment
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Expose application port
 EXPOSE 3000
 
-# Start the application
 CMD ["node", "index.js"]
