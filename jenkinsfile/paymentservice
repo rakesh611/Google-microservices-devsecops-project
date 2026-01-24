@@ -12,7 +12,6 @@ pipeline {
         IMAGE_NAME   = 'paymentservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-        NVD_API_KEY  = ''
     }
 
     stages {
@@ -76,37 +75,6 @@ pipeline {
                         }
                         echo "ℹ️ npm audit found ${criticalHighCount} high/critical vulnerabilities (ignored for local test)"
                     }
-                }
-            }
-        }
-
-        stage("OWASP Dependency Check (Local)") {
-            steps {
-                dir('src/paymentservice') {
-                    script {
-                        try {
-                            dependencyCheck additionalArguments: """
-                                --scan . \
-                                --format XML \
-                                --nvdApiKey ${NVD_API_KEY} \
-                                --nvdApiDelay 60000 \
-                                --disableYarnAudit \
-                                --disableNodeAudit
-                            """,
-                            odcInstallation: 'dp-check'
-
-                            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-                        } catch (err) {
-                            echo "⚠️ OWASP Dependency Check skipped or failed: ${err}"
-                        }
-                    }
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'src/paymentservice/dependency-check-report.xml',
-                                     allowEmptyArchive: true
-                    echo "ℹ️ OWASP Dependency Check completed (vulnerabilities ignored for local test)"
                 }
             }
         }
@@ -188,7 +156,7 @@ pipeline {
                 """,
                 to: 'jharakesh485@gmail.com',
                 mimeType: 'text/html',
-                attachmentsPattern: '**/dependency-check-report.xml, **/trivy-*.json, **/trivy-*.txt'
+                attachmentsPattern: '**/trivy-*.json, **/trivy-*.txt'
             )
         }
     }
