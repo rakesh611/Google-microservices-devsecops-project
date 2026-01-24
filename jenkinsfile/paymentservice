@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        // Sonar
+        // SonarQube
         SCANNER_HOME = tool 'sonar'
 
         // Docker
@@ -16,16 +16,14 @@ pipeline {
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
 
-        // NVD Key for Dependency Check
+        // OWASP Dependency Check NVD API Key
         NVD_API_KEY  = '02b4cafb-1118-43fd-99ed-105238892071'
     }
 
     stages {
 
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
         stage("Git Checkout") {
@@ -56,10 +54,9 @@ pipeline {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
-                        def qg = waitForQualityGate abortPipeline: false
-                        if (qg.status != 'OK') {
-                            echo "⚠️ Quality Gate status: ${qg.status} (ignored for local test)"
-                        }
+                        // Fail pipeline if SonarQube Quality Gate is not OK
+                        def qg = waitForQualityGate abortPipeline: true
+                        echo "✅ SonarQube Quality Gate status: ${qg.status}"
                     }
                 }
             }
@@ -73,10 +70,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           OWASP Dependency Check
-           (ONLINE MODE – WITH NVD KEY)
-        ========================= */
         stage("OWASP Dependency Check") {
             steps {
                 dir('src/paymentservice') {
@@ -84,6 +77,7 @@ pipeline {
                         --scan .
                         --format XML
                         --nvdApiKey ${NVD_API_KEY}
+                        --nvdApiDelay 60000
                         --disableYarnAudit
                         --disableNodeAudit
                     """,
@@ -135,10 +129,7 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     script {
-                        docker.withRegistry(
-                            'https://index.docker.io/v1/',
-                            'dockerhub1'
-                        ) {
+                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                             docker.image("${FULL_IMAGE}").push()
                             docker.image("${FULL_IMAGE}").push('latest')
                         }
@@ -151,8 +142,8 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE} || true
-                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE} || true
+                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE}
+                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE}
                     """
                 }
             }
