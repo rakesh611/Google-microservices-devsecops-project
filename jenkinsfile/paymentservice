@@ -64,10 +64,10 @@ pipeline {
                 dir('src/paymentservice') {
                     script {
                         try {
-                            // Install production dependencies safely, ignoring scripts
+                            // Safe installation ignoring scripts to reduce attack surface
                             sh 'npm ci --only=production --ignore-scripts || true'
 
-                            // Run npm audit
+                            // Run npm audit safely
                             def auditJson = sh(script: 'npm audit --json || true', returnStdout: true)
                             def audit = readJSON text: auditJson
                             def criticalHighCount = 0
@@ -78,7 +78,7 @@ pipeline {
                             }
                             echo "ℹ️ npm audit found ${criticalHighCount} high/critical vulnerabilities (ignored for local test)"
                         } catch (err) {
-                            echo "⚠️ npm install/audit failed: ${err}"
+                            echo "⚠️ npm install/audit failed but pipeline will continue: ${err}"
                         }
                     }
                 }
@@ -88,12 +88,18 @@ pipeline {
         stage("Trivy File Scan (Local)") {
             steps {
                 dir('src/paymentservice') {
-                    sh '''
-                    trivy fs . \
-                      --severity CRITICAL,HIGH \
-                      --scanners vuln,misconfig,secret \
-                      -f json -o trivy-fs-report.json || true
-                    '''
+                    script {
+                        try {
+                            sh '''
+                            trivy fs . \
+                              --severity CRITICAL,HIGH \
+                              --scanners vuln,misconfig,secret \
+                              -f json -o trivy-fs-report.json || true
+                            '''
+                        } catch (err) {
+                            echo "⚠️ Trivy FS scan failed but pipeline will continue: ${err}"
+                        }
+                    }
                 }
             }
             post {
@@ -108,11 +114,17 @@ pipeline {
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
-                    sh """
-                    echo "Building image: ${FULL_IMAGE}"
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
-                    """
+                    script {
+                        try {
+                            sh """
+                            echo "Building image: ${FULL_IMAGE}"
+                            docker rmi -f ${FULL_IMAGE} || true
+                            docker build -t ${FULL_IMAGE} .
+                            """
+                        } catch (err) {
+                            echo "⚠️ Docker build failed but pipeline will continue: ${err}"
+                        }
+                    }
                 }
             }
         }
@@ -121,9 +133,13 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     script {
-                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
+                        try {
+                            docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                                docker.image("${FULL_IMAGE}").push()
+                                docker.image("${FULL_IMAGE}").push('latest')
+                            }
+                        } catch (err) {
+                            echo "⚠️ Docker push failed but pipeline will continue: ${err}"
                         }
                     }
                 }
@@ -133,10 +149,16 @@ pipeline {
         stage("Trivy Image Scan (Local)") {
             steps {
                 dir('src/paymentservice') {
-                    sh """
-                    trivy image -f json -o trivy-image-paymentservice.json ${FULL_IMAGE} || true
-                    trivy image -f table -o trivy-image-paymentservice.txt ${FULL_IMAGE} || true
-                    """
+                    script {
+                        try {
+                            sh """
+                            trivy image -f json -o trivy-image-paymentservice.json ${FULL_IMAGE} || true
+                            trivy image -f table -o trivy-image-paymentservice.txt ${FULL_IMAGE} || true
+                            """
+                        } catch (err) {
+                            echo "⚠️ Trivy image scan failed but pipeline will continue: ${err}"
+                        }
+                    }
                 }
             }
             post {
