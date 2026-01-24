@@ -1,32 +1,49 @@
-# Use official Node.js 20 Alpine image
-FROM node:20-alpine
+# Copyright 2020 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-# Create a non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+FROM node:20.2.0-alpine as base
 
-# Set working directory
+FROM base as builder
+
+# Some packages (e.g. @google-cloud/profiler) require additional
+# deps for post-install scripts
+RUN apk add --update --no-cache \
+    python3 \
+    make \
+    g++ 
+
 WORKDIR /usr/src/app
 
-# Copy package.json files first (for caching)
 COPY package*.json ./
 
-# Install dependencies safely, ignoring post-install scripts
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
+RUN npm install --only=production
 
-# Copy all source code (adjusted for correct path)
-COPY . . 
+FROM base as without-grpc-health-probe-bin
 
-# Set ownership to non-root user
-RUN chown -R appuser:appgroup /usr/src/app
+WORKDIR /usr/src/app
 
-# Switch to non-root user
-USER appuser
+COPY --from=builder /usr/src/app/node_modules ./node_modules
 
-# Environment
-ENV NODE_ENV=production
-ENV PORT=3000
+COPY . .
 
-EXPOSE 3000
+EXPOSE 50051
 
-# Start the app
-CMD ["node", "src/index.js"]
+ENTRYPOINT [ "node", "index.js" ]
+
+FROM without-grpc-health-probe-bin
+
+# renovate: datasource=github-releases depName=grpc-ecosystem/grpc-health-probe
+ENV GRPC_HEALTH_PROBE_VERSION=v0.4.18
+RUN wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    chmod +x /bin/grpc_health_probe
