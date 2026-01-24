@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar'
         DOCKER_NAME  = 'rakesh6nm/emailservice'
         IMAGE_NAME   = 'emailservice'
         PATH = "$PATH:/var/lib/jenkins/.local/bin"   // <-- Fix: add pip install path
@@ -45,7 +45,7 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 dir('src/emailservice') {
-                    withSonarQubeEnv('sonar-server') {
+                    withSonarQubeEnv('sonar-jenkins') {
                         sh '''
                         $SCANNER_HOME/bin/sonar-scanner \
                           -Dsonar.projectKey=emailservice \
@@ -126,7 +126,7 @@ pipeline {
         stage("Push to DockerHub") {
             steps {
                 dir('src/emailservice') {
-                    withCredentials([string(credentialsId: 'docker-cred', variable: 'dockerpwd')]) {
+                    withCredentials([string(credentialsId: 'dockerhub1', variable: 'dockerpwd')]) {
                         sh '''
                         docker login -u rakesh6nm -p ${dockerpwd}
                         docker push ${IMAGE_TAG}
