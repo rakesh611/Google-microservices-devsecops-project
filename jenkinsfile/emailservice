@@ -10,7 +10,7 @@ pipeline {
         SCANNER_HOME = tool 'sonar'
         DOCKER_NAME  = 'rakesh6nm/emailservice'
         IMAGE_NAME   = 'emailservice'
-        PATH = "$PATH:/var/lib/jenkins/.local/bin"   // <-- Fix: add pip install path
+        PATH = "${env.PATH}:/home/jenkins/.local/bin"   // <-- Fix: add pip install path
     }
 
     stages {
@@ -29,14 +29,15 @@ pipeline {
             steps {
                 dir('src/emailservice') {
                     sh '''
-                    python3 -m pip install --user --upgrade bandit
+                    python3 -m pip install --user bandit
+                    export PATH=$PATH:/home/jenkins/.local/bin
                     bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/emailservice/bandit-report.json'
+                    archiveArtifacts artifacts: 'src/emailservice/bandit-report.json', allowEmptyArchive: true
                 }
             }
         }
