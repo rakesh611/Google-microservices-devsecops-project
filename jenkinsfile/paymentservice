@@ -41,7 +41,7 @@ pipeline {
                 dir('src/paymentservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh """
-                        ${SCANNER_HOME}/bin/sonar \
+                        ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=paymentservice \
                           -Dsonar.projectName=paymentservice \
                           -Dsonar.sources=. \
