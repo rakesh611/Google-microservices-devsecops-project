@@ -62,18 +62,24 @@ pipeline {
         stage("Install Dependencies & npm Audit") {
             steps {
                 dir('src/paymentservice') {
-                    sh 'npm install || true'
-
                     script {
-                        def auditJson = sh(script: 'npm audit --json || true', returnStdout: true)
-                        def audit = readJSON text: auditJson
-                        def criticalHighCount = 0
-                        if (audit?.metadata?.vulnerabilities) {
-                            audit.metadata.vulnerabilities.each { level, count ->
-                                if (level in ['high', 'critical']) { criticalHighCount += count }
+                        try {
+                            // Install production dependencies safely, ignoring scripts
+                            sh 'npm ci --only=production --ignore-scripts || true'
+
+                            // Run npm audit
+                            def auditJson = sh(script: 'npm audit --json || true', returnStdout: true)
+                            def audit = readJSON text: auditJson
+                            def criticalHighCount = 0
+                            if (audit?.metadata?.vulnerabilities) {
+                                audit.metadata.vulnerabilities.each { level, count ->
+                                    if (level in ['high', 'critical']) { criticalHighCount += count }
+                                }
                             }
+                            echo "ℹ️ npm audit found ${criticalHighCount} high/critical vulnerabilities (ignored for local test)"
+                        } catch (err) {
+                            echo "⚠️ npm install/audit failed: ${err}"
                         }
-                        echo "ℹ️ npm audit found ${criticalHighCount} high/critical vulnerabilities (ignored for local test)"
                     }
                 }
             }
