@@ -1,54 +1,26 @@
-# =========================
-# Base Image
-# =========================
-FROM node:20-alpine AS base
+# Use official Node.js image as base
+FROM node:20-alpine
 
-# =========================
-# Builder Stage
-# =========================
-FROM base AS builder
-
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++
-
+# Set working directory
 WORKDIR /usr/src/app
 
+# Copy package.json and package-lock.json first for caching
 COPY package*.json ./
 
-# Use modern npm flag
-RUN npm ci --omit=dev
+# Install dependencies in a single RUN instruction
+# Chaining commands, cleaning up caches, and using alphabetical order
+RUN npm ci --only=production && \
+    npm cache clean --force
 
-# =========================
-# Runtime Stage
-# =========================
-FROM base AS runtime
-
-WORKDIR /usr/src/app
-
-# Copy node_modules from builder
-COPY --from=builder /usr/src/app/node_modules ./node_modules
-
-# Copy application source
+# Copy application source code
 COPY . .
 
-# =========================
-# Install grpc health probe (AS ROOT)
-# =========================
-ENV GRPC_HEALTH_PROBE_VERSION=v0.4.18
+# Set environment variables (if needed)
+ENV NODE_ENV=production
+ENV PORT=3000
 
-RUN wget -qO /usr/local/bin/grpc_health_probe \
-    https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 \
-    && chmod +x /usr/local/bin/grpc_health_probe
+# Expose application port
+EXPOSE 3000
 
-# =========================
-# Create Non-Root User
-# =========================
-RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup
-
-USER nodeuser
-
-EXPOSE 50051
-
-ENTRYPOINT ["node", "index.js"]
+# Start the application
+CMD ["node", "index.js"]
