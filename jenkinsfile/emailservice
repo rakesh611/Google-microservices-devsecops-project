@@ -130,9 +130,9 @@ pipeline {
         // ---------------- Push Image ----------------
         stage("Push to DockerHub") {
             steps {
-                withCredentials([string(credentialsId: 'dockerhub1', variable: 'DOCKER_PWD')]) {
+                withCredentials([string(credentialsId: 'dockerhub1', variable: 'DOCKER_TOKEN')]) {
                     sh '''
-                    docker login -u rakesh6nm -p ${DOCKER_PWD}
+                    docker login -u rakesh6nm -p ${DOCKER_TOKEN}
                     docker push ${IMAGE_TAG}
                     docker push ${DOCKER_REPO}:latest
                     '''
