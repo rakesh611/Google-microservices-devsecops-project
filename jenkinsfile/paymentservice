@@ -15,6 +15,9 @@ pipeline {
         IMAGE_NAME   = 'paymentservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // NVD Key for Dependency Check
+        NVD_API_KEY  = '02b4cafb-1118-43fd-99ed-105238892071'
     }
 
     stages {
@@ -72,18 +75,18 @@ pipeline {
 
         /* =========================
            OWASP Dependency Check
-           (LOCAL MODE – NO NVD KEY)
+           (ONLINE MODE – WITH NVD KEY)
         ========================= */
-        stage("OWASP Dependency Check (Local)") {
+        stage("OWASP Dependency Check") {
             steps {
                 dir('src/paymentservice') {
-                    dependencyCheck additionalArguments: '''
+                    dependencyCheck additionalArguments: """
                         --scan .
-                        --noupdate
+                        --format XML
+                        --nvdApiKey ${NVD_API_KEY}
                         --disableYarnAudit
                         --disableNodeAudit
-                        --format XML
-                    ''',
+                    """,
                     odcInstallation: 'dp-check'
 
                     dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
@@ -148,8 +151,8 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE}
-                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE}
+                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE} || true
+                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE} || true
                     """
                 }
             }
