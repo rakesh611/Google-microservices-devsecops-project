@@ -2,29 +2,38 @@ pipeline {
     agent any
 
     tools {
-        // Python already installed via system packages
         jdk 'jdk17'
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_NAME  = 'rakesh6nm/loadgenerator'
+        SCANNER_HOME = tool 'sonar'
+
+        // Docker config (ALIGNED WITH FRONTEND)
+        DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'loadgenerator'
-        PATH = "$PATH:/var/lib/jenkins/.local/bin"   // <-- Fix: add pip install path
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // pip --user path
+        PATH = "$PATH:/var/lib/jenkins/.local/bin"
     }
 
     stages {
+
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main',
+                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
-        // --- SAST: Bandit ---
+        /* =========================
+           SAST – BANDIT
+        ========================= */
         stage("Bandit Security Scan") {
             steps {
                 dir('src/loadgenerator') {
@@ -41,18 +50,20 @@ pipeline {
             }
         }
 
-        // --- SAST: SonarQube ---
+        /* =========================
+           SONARQUBE
+        ========================= */
         stage("SonarQube Analysis") {
             steps {
                 dir('src/loadgenerator') {
-                    withSonarQubeEnv('sonar-server') {
-                        sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                          -Dsonar.projectKey=loadgenerator \
-                          -Dsonar.projectName=loadgenerator \
-                          -Dsonar.sources=. \
-                          -Dsonar.language=py
-                        '''
+                    withSonarQubeEnv('sonar-jenkins') {
+                        sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=loadgenerator \
+                        -Dsonar.projectName=loadgenerator \
+                        -Dsonar.sources=. \
+                        -Dsonar.language=py
+                        """
                     }
                 }
             }
@@ -60,15 +71,16 @@ pipeline {
 
         stage("Quality Gate") {
             steps {
-                script {
-                    timeout(time: 3, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
-                    }
+                timeout(time: 3, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true,
+                        credentialsId: 'sonar-jenkins'
                 }
             }
         }
 
-        // --- Install Dependencies ---
+        /* =========================
+           DEPENDENCIES
+        ========================= */
         stage("Install Dependencies") {
             steps {
                 dir('src/loadgenerator') {
@@ -77,7 +89,9 @@ pipeline {
             }
         }
 
-        // --- Dependency Scan (Safety) ---
+        /* =========================
+           SCA – SAFETY
+        ========================= */
         stage("Safety Dependency Scan") {
             steps {
                 dir('src/loadgenerator') {
@@ -94,11 +108,19 @@ pipeline {
             }
         }
 
-        // --- Trivy FS Scan ---
+        /* =========================
+           TRIVY FS SCAN
+        ========================= */
         stage("Trivy File Scan") {
             steps {
                 dir('src/loadgenerator') {
-                    sh 'trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true'
+                    sh '''
+                    trivy fs . \
+                      --severity CRITICAL,HIGH \
+                      --scanners vuln,misconfig,secret \
+                      --exit-code 1 \
+                      > trivy-fs-report.txt || true
+                    '''
                 }
             }
             post {
@@ -108,80 +130,78 @@ pipeline {
             }
         }
 
-        // --- Build Docker Image ---
+        /* =========================
+           DOCKER BUILD
+        ========================= */
         stage("Build Docker Image") {
             steps {
                 dir('src/loadgenerator') {
-                    script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
-                        sh "docker build -t $IMAGE_NAME ."
-                        sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
-                    }
+                    sh """
+                    echo "Building Docker image: ${FULL_IMAGE}"
+                    docker rmi -f ${FULL_IMAGE} || true
+                    docker build -t ${FULL_IMAGE} .
+                    """
                 }
             }
         }
 
-        // --- Push Docker Image ---
-        stage("Push to DockerHub") {
+        /* =========================
+           DOCKER PUSH (FIXED)
+        ========================= */
+        stage("Push Image to DockerHub") {
             steps {
                 dir('src/loadgenerator') {
-                    withCredentials([string(credentialsId: 'docker-cred', variable: 'dockerpwd')]) {
-                        sh '''
-                        docker login -u rakesh6nm -p ${dockerpwd}
-                        docker push ${IMAGE_TAG}
-                        docker tag ${IMAGE_NAME} ${DOCKER_NAME}:latest
-                        docker push ${DOCKER_NAME}:latest
-                        '''
+                    script {
+                        docker.withRegistry(
+                            'https://index.docker.io/v1/',
+                            'dockerhub1'
+                        ) {
+                            docker.image("${FULL_IMAGE}").push()
+                            docker.image("${FULL_IMAGE}").push('latest')
+                        }
                     }
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
+        /* =========================
+           TRIVY IMAGE SCAN
+        ========================= */
         stage("Trivy Scan Image") {
             steps {
                 dir('src/loadgenerator') {
-                    sh '''
-                    trivy image -f json -o trivy-image-email.json ${IMAGE_TAG}
-                    trivy image -f table -o trivy-image-email.txt ${IMAGE_TAG}
-                    '''
+                    sh """
+                    trivy image -f json  -o trivy-image-loadgenerator.json ${FULL_IMAGE}
+                    trivy image -f table -o trivy-image-loadgenerator.txt  ${FULL_IMAGE}
+                    """
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/loadgenerator/trivy-image-email.*'
+                    archiveArtifacts 'src/loadgenerator/trivy-image-loadgenerator.*'
                 }
             }
         }
     }
 
-    // --- Final Notifications ---
+    /* =========================
+       EMAIL NOTIFICATION
+    ========================= */
     post {
         always {
-            dir('src/loadgenerator') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>loadgenerator Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'bandit-report.json,safety-report.json,trivy-fs-report.txt,trivy-image-email.json,trivy-image-email.txt'
-                    )
-                }
-            }
+            emailext(
+                subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                <p><b>LoadGenerator Google-Shop DevSecOps Pipeline</b></p>
+                <p>Status: ${currentBuild.currentResult}</p>
+                <p>Job: ${env.JOB_NAME}</p>
+                <p>Build: ${env.BUILD_NUMBER}</p>
+                <p><a href="${env.BUILD_URL}">View Build</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: '**/bandit-report.json, **/safety-report.json, **/trivy-*.txt, **/trivy-*.json'
+            )
         }
     }
 }
-
