@@ -1,3 +1,4 @@
+# Use official Node.js 20 Alpine image
 FROM node:20-alpine
 
 # Create a non-root user
@@ -12,8 +13,8 @@ COPY package*.json ./
 # Install dependencies safely, ignoring post-install scripts
 RUN npm ci --only=production --ignore-scripts && npm cache clean --force
 
-# Copy only the source code
-COPY src/ ./src
+# Copy all source code (adjusted for correct path)
+COPY . . 
 
 # Set ownership to non-root user
 RUN chown -R appuser:appgroup /usr/src/app
@@ -27,4 +28,5 @@ ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["node", "index.js"]
+# Start the app
+CMD ["node", "src/index.js"]
