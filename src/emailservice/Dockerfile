@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS base
+FROM python:3.10-slim AS base
 
 # ---------- Builder ----------
 FROM base AS builder
@@ -33,7 +33,7 @@ ENV ENABLE_PROFILER=1
 
 WORKDIR /email_server
 
-COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
+COPY --from=builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /bin/grpc_health_probe /bin/grpc_health_probe
 
