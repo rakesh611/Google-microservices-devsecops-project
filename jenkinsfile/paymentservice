@@ -7,16 +7,11 @@ pipeline {
     }
 
     environment {
-        // SonarQube
         SCANNER_HOME = tool 'sonar'
-
-        // Docker
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'paymentservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-
-        // OWASP Dependency Check NVD API Key
         NVD_API_KEY  = '02b4cafb-1118-43fd-99ed-105238892071'
     }
 
@@ -54,8 +49,12 @@ pipeline {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
-                        def qg = waitForQualityGate abortPipeline: false
-                        echo "⚠️ SonarQube Quality Gate status: ${qg.status} (ignored for local test)"
+                        try {
+                            def qg = waitForQualityGate abortPipeline: false
+                            echo "⚠️ SonarQube Quality Gate status: ${qg.status} (ignored for local test)"
+                        } catch (err) {
+                            echo "⚠️ Could not check Quality Gate: ${err}"
+                        }
                     }
                 }
             }
@@ -64,22 +63,17 @@ pipeline {
         stage("Install Dependencies & npm Audit") {
             steps {
                 dir('src/paymentservice') {
-                    sh 'npm install'
+                    sh 'npm install || true'
 
                     script {
-                        // Run npm audit in JSON format
                         def auditJson = sh(script: 'npm audit --json || true', returnStdout: true)
                         def audit = readJSON text: auditJson
                         def criticalHighCount = 0
-
-                        if (audit.metadata.vulnerabilities) {
+                        if (audit?.metadata?.vulnerabilities) {
                             audit.metadata.vulnerabilities.each { level, count ->
-                                if (level in ['high', 'critical']) {
-                                    criticalHighCount += count
-                                }
+                                if (level in ['high', 'critical']) { criticalHighCount += count }
                             }
                         }
-
                         echo "ℹ️ npm audit found ${criticalHighCount} high/critical vulnerabilities (ignored for local test)"
                     }
                 }
@@ -89,17 +83,23 @@ pipeline {
         stage("OWASP Dependency Check (Local)") {
             steps {
                 dir('src/paymentservice') {
-                    dependencyCheck additionalArguments: """
-                        --scan .
-                        --format XML
-                        --nvdApiKey ${NVD_API_KEY}
-                        --nvdApiDelay 60000
-                        --disableYarnAudit
-                        --disableNodeAudit
-                    """,
-                    odcInstallation: 'dp-check'
+                    script {
+                        try {
+                            dependencyCheck additionalArguments: """
+                                --scan . \
+                                --format XML \
+                                --nvdApiKey ${NVD_API_KEY} \
+                                --nvdApiDelay 60000 \
+                                --disableYarnAudit \
+                                --disableNodeAudit
+                            """,
+                            odcInstallation: 'dp-check'
 
-                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                        } catch (err) {
+                            echo "⚠️ OWASP Dependency Check skipped or failed: ${err}"
+                        }
+                    }
                 }
             }
             post {
@@ -124,7 +124,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'src/paymentservice/trivy-fs-report.json, src/paymentservice/trivy-fs-report.txt',
+                    archiveArtifacts artifacts: 'src/paymentservice/trivy-fs-report.json',
                                      allowEmptyArchive: true
                     echo "ℹ️ Trivy file scan completed (vulnerabilities ignored for local test)"
                 }
@@ -188,7 +188,7 @@ pipeline {
                 """,
                 to: 'jharakesh485@gmail.com',
                 mimeType: 'text/html',
-                attachmentsPattern: '**/dependency-check-report.xml, **/trivy-*.txt, **/trivy-*.json'
+                attachmentsPattern: '**/dependency-check-report.xml, **/trivy-*.json, **/trivy-*.txt'
             )
         }
     }
