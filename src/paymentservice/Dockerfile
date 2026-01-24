@@ -1,49 +1,57 @@
-# Copyright 2020 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# --------------------------------------------------
+# Base image (use supported Alpine)
+# --------------------------------------------------
+FROM node:20-alpine AS base
 
-FROM node:20.2.0-alpine@sha256:f25b0e9d3d116e267d4ff69a3a99c0f4cf6ae94eadd87f1bf7bd68ea3ff0bef7 as base
+# --------------------------------------------------
+# Builder stage
+# --------------------------------------------------
+FROM base AS builder
 
-FROM base as builder
-
-# Some packages (e.g. @google-cloud/profiler) require additional
-# deps for post-install scripts
-RUN apk add --update --no-cache \
+# Required for native npm modules
+RUN apk add --no-cache \
     python3 \
     make \
-    g++ 
+    g++
 
 WORKDIR /usr/src/app
 
+# Copy only package files first (layer caching)
 COPY package*.json ./
 
-RUN npm install --only=production
+# Install production dependencies only
+RUN npm ci --only=production
 
-FROM base as without-grpc-health-probe-bin
+# --------------------------------------------------
+# Runtime image (without grpc probe)
+# --------------------------------------------------
+FROM base AS runtime
 
 WORKDIR /usr/src/app
 
+# Copy node_modules from builder
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 
+# Copy application source
 COPY . .
+
+# Create non-root user (SECURITY BEST PRACTICE)
+RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup
+USER nodeuser
 
 EXPOSE 50051
 
-ENTRYPOINT [ "node", "index.js" ]
+ENTRYPOINT ["node", "index.js"]
 
-FROM without-grpc-health-probe-bin
+# --------------------------------------------------
+# Runtime image WITH grpc health probe
+# --------------------------------------------------
+FROM runtime AS with-grpc-health-probe
 
 # renovate: datasource=github-releases depName=grpc-ecosystem/grpc-health-probe
 ENV GRPC_HEALTH_PROBE_VERSION=v0.4.18
-RUN wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
-    chmod +x /bin/grpc_health_probe
+
+RUN wget -qO /bin/grpc_health_probe \
+    https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 \
+    && chmod +x /bin/grpc_health_probe
+
