@@ -1,27 +1,27 @@
 FROM node:20-alpine
 
-# Create app user
+# Create a non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy package files only
+# Copy package.json files first (for caching)
 COPY package*.json ./
 
-# Install dependencies safely
-RUN npm ci --only=production && npm cache clean --force
+# Install dependencies safely, ignoring post-install scripts
+RUN npm ci --only=production --ignore-scripts && npm cache clean --force
 
-# Copy only source code
+# Copy only the source code
 COPY src/ ./src
 
-# Change ownership to non-root user
+# Set ownership to non-root user
 RUN chown -R appuser:appgroup /usr/src/app
 
 # Switch to non-root user
 USER appuser
 
-# Set environment
+# Environment
 ENV NODE_ENV=production
 ENV PORT=3000
 
