@@ -54,7 +54,6 @@ pipeline {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
-                        // Fail pipeline if SonarQube Quality Gate is not OK
                         def qg = waitForQualityGate abortPipeline: true
                         echo "✅ SonarQube Quality Gate status: ${qg.status}"
                     }
@@ -62,10 +61,31 @@ pipeline {
             }
         }
 
-        stage("Install Dependencies") {
+        stage("Install Dependencies & Check npm Audit") {
             steps {
                 dir('src/paymentservice') {
                     sh 'npm install'
+
+                    script {
+                        // Run npm audit in JSON format
+                        def auditJson = sh(script: 'npm audit --json || true', returnStdout: true)
+                        def audit = readJSON text: auditJson
+                        def criticalHighCount = 0
+
+                        if (audit.metadata.vulnerabilities) {
+                            audit.metadata.vulnerabilities.each { level, count ->
+                                if (level in ['high', 'critical']) {
+                                    criticalHighCount += count
+                                }
+                            }
+                        }
+
+                        if (criticalHighCount > 0) {
+                            error "❌ npm audit failed: ${criticalHighCount} high/critical vulnerabilities found"
+                        } else {
+                            echo "✅ npm audit passed: No high/critical vulnerabilities"
+                        }
+                    }
                 }
             }
         }
@@ -90,6 +110,13 @@ pipeline {
                 always {
                     archiveArtifacts artifacts: 'src/paymentservice/dependency-check-report.xml',
                                      allowEmptyArchive: true
+
+                    script {
+                        def report = readFile 'src/paymentservice/dependency-check-report.xml'
+                        if (report.contains('severity="Critical"') || report.contains('severity="High"')) {
+                            error "❌ OWASP Dependency Check failed: High/Critical vulnerabilities detected"
+                        }
+                    }
                 }
             }
         }
@@ -101,14 +128,29 @@ pipeline {
                     trivy fs . \
                       --severity CRITICAL,HIGH \
                       --scanners vuln,misconfig,secret \
-                      > trivy-fs-report.txt || true
+                      -f json -o trivy-fs-report.json || true
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'src/paymentservice/trivy-fs-report.txt',
+                    archiveArtifacts artifacts: 'src/paymentservice/trivy-fs-report.json, src/paymentservice/trivy-fs-report.txt',
                                      allowEmptyArchive: true
+
+                    script {
+                        def trivyReport = readJSON file: 'src/paymentservice/trivy-fs-report.json'
+                        def vulnCount = 0
+                        trivyReport.Results.each { result ->
+                            result.Vulnerabilities?.each { vuln ->
+                                if (vuln.Severity in ['HIGH', 'CRITICAL']) {
+                                    vulnCount++
+                                }
+                            }
+                        }
+                        if (vulnCount > 0) {
+                            error "❌ Trivy file scan failed: ${vulnCount} high/critical vulnerabilities found"
+                        }
+                    }
                 }
             }
         }
@@ -142,8 +184,8 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE}
-                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE}
+                    trivy image -f json  -o trivy-image-paymentservice.json ${FULL_IMAGE} || true
+                    trivy image -f table -o trivy-image-paymentservice.txt  ${FULL_IMAGE} || true
                     """
                 }
             }
@@ -151,6 +193,21 @@ pipeline {
                 always {
                     archiveArtifacts artifacts: 'src/paymentservice/trivy-image-paymentservice.*',
                                      allowEmptyArchive: true
+
+                    script {
+                        def trivyImageReport = readJSON file: 'src/paymentservice/trivy-image-paymentservice.json'
+                        def vulnCount = 0
+                        trivyImageReport.Results.each { result ->
+                            result.Vulnerabilities?.each { vuln ->
+                                if (vuln.Severity in ['HIGH', 'CRITICAL']) {
+                                    vulnCount++
+                                }
+                            }
+                        }
+                        if (vulnCount > 0) {
+                            error "❌ Trivy image scan failed: ${vulnCount} high/critical vulnerabilities found"
+                        }
+                    }
                 }
             }
         }
