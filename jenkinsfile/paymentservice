@@ -8,8 +8,10 @@ pipeline {
     
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_NAME  = 'rakesh6nm/paymentservice'
-        IMAGE_NAME   = 'paymentservice'
+        DOCKER_USER   = 'rakesh6nm'
+        IMAGE_NAME    = 'paymentservice'
+        IMAGE_TAG     = "${BUILD_NUMBER}"
+        FULL_IMAGE    = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
     stages {
@@ -23,7 +25,6 @@ pipeline {
             }
         }
 
-        // --- SAST: SonarQube for Node.js ---
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
@@ -40,7 +41,6 @@ pipeline {
             }
         }
 
-        // --- Quality Gate ---
         stage("Quality Gate") {
             steps {
                 script {
@@ -51,7 +51,6 @@ pipeline {
             }
         }
 
-        // --- Install Dependencies ---
         stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
@@ -60,29 +59,27 @@ pipeline {
             }
         }
 
-          stage("OWASP FS Scan") {
+        stage("OWASP Dependency Check") {
             steps {
                 dir('src/paymentservice') {
-                dependencyCheck additionalArguments: '''
-                    --scan ./ 
-                    --disableYarnAudit 
-                    --disableNodeAudit 
-                
-                   ''',
-                odcInstallation: 'dp-check'
+                    dependencyCheck additionalArguments: '''
+                        --scan ./ 
+                        --disableYarnAudit 
+                        --disableNodeAudit
+                    ''',
+                    odcInstallation: 'dp-check'
 
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                }
             }
-        }
-                    post {
+            post {
                 always {
                     archiveArtifacts 'src/paymentservice/dependency-check-report.xml'
                 }
             }
-          }
+        }
 
-        // --- Trivy FS Scan ---
-        stage("Trivy File Scan") {
+        stage("Trivy FS Scan") {
             steps {
                 dir('src/paymentservice') {
                     sh '''
@@ -97,7 +94,7 @@ pipeline {
             }
         }
 
-               stage("Build Docker Image") {
+        stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     sh """
@@ -114,39 +111,37 @@ pipeline {
                 dir('src/paymentservice') {
                     script {
                         docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push() || true
-                            docker.image("${FULL_IMAGE}").push('latest') || true
+                            docker.image("${FULL_IMAGE}").push()
+                            docker.image("${FULL_IMAGE}").push('latest')
                         }
                     }
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
-        stage("Trivy Scan Image") {
+        stage("Trivy Image Scan") {
             steps {
                 dir('src/paymentservice') {
-                    sh '''
-                    trivy image -f json -o trivy-image-currency.json ${IMAGE_TAG}
-                    trivy image -f table -o trivy-image-currency.txt ${IMAGE_TAG}
-                    '''
+                    sh """
+                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE}
+                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE}
+                    """
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/paymentservice/trivy-image-currency.*'
+                    archiveArtifacts 'src/paymentservice/trivy-image-payment.*'
                 }
             }
         }
     }
 
-    // --- Final Notifications ---
     post {
         always {
             dir('src/paymentservice') {
                 script {
                     def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
+                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'Github User'
 
                     emailext (
                         subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -161,7 +156,7 @@ pipeline {
                         to: 'jharakesh485@gmail.com',
                         from: 'jharakesh485@gmail.com',
                         mimeType: 'text/html',
-                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-currency.json,trivy-image-currency.txt,dependency-check-report.xml'
+                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-payment.json,trivy-image-payment.txt,dependency-check-report.xml'
                     )
                 }
             }
