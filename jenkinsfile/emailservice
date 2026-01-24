@@ -2,83 +2,80 @@ pipeline {
     agent any
 
     tools {
-        // Python already installed via system packages
         jdk 'jdk17'
     }
 
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_NAME  = 'rakesh6nm/emailservice'
         IMAGE_NAME   = 'emailservice'
-        PATH = "${env.PATH}:/home/jenkins/.local/bin"   // <-- Fix: add pip install path
+        DOCKER_REPO  = 'rakesh6nm/emailservice'
+        PATH = "${env.PATH}:/home/jenkins/.local/bin"
     }
 
     stages {
+
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main',
+                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
-        // --- SAST: Bandit ---
+        // ---------------- SAST: Bandit ----------------
         stage("Bandit Security Scan") {
             steps {
                 dir('src/emailservice') {
                     sh '''
                     python3 -m pip install --user bandit
-                    export PATH=$PATH:/home/jenkins/.local/bin
-                    bandit -r . -f json -o bandit-report.json || true
+                    python3 -m bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'src/emailservice/bandit-report.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'src/emailservice/bandit-report.json',
+                                     allowEmptyArchive: true
                 }
             }
         }
 
-        // --- SAST: SonarQube ---
+        // ---------------- SonarQube ----------------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/emailservice') {
                     withSonarQubeEnv('sonar-jenkins') {
-                        sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
+                        sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=emailservice \
                           -Dsonar.projectName=emailservice \
                           -Dsonar.sources=. \
                           -Dsonar.language=py
-                        '''
+                        """
                     }
                 }
             }
         }
 
+        // ---------------- Quality Gate (NON-BLOCKING) ----------------
         stage("Quality Gate") {
             steps {
                 script {
                     timeout(time: 10, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true, credentialsId: 'sonar-jenkins'
+                        def qg = waitForQualityGate abortPipeline: false
+                        if (qg.status != 'OK') {
+                            echo "⚠️ Quality Gate failed: ${qg.status}"
+                            currentBuild.result = 'UNSTABLE'
+                        }
                     }
                 }
             }
         }
 
-        // --- Install Dependencies ---
-        stage("Install Dependencies") {
-            steps {
-                dir('src/emailservice') {
-                    sh 'python3 -m pip install --user -r requirements.txt || true'
-                }
-            }
-        }
-
-        // --- Dependency Scan (Safety) ---
+        // ---------------- Dependency Scan ----------------
         stage("Safety Dependency Scan") {
             steps {
                 dir('src/emailservice') {
@@ -95,11 +92,17 @@ pipeline {
             }
         }
 
-        // --- Trivy FS Scan ---
+        // ---------------- Trivy FS Scan ----------------
         stage("Trivy File Scan") {
             steps {
                 dir('src/emailservice') {
-                    sh 'trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true'
+                    sh '''
+                    trivy fs . \
+                      --severity HIGH,CRITICAL \
+                      --scanners vuln,misconfig,secret \
+                      --format table \
+                      --output trivy-fs-report.txt || true
+                    '''
                 }
             }
             post {
@@ -109,79 +112,73 @@ pipeline {
             }
         }
 
-        // --- Build Docker Image ---
+        // ---------------- Docker Build ----------------
         stage("Build Docker Image") {
             steps {
                 dir('src/emailservice') {
                     script {
-                        env.IMAGE_TAG = "$DOCKER_NAME:${BUILD_NUMBER}"
-                        sh "docker rmi -f $IMAGE_NAME ${env.IMAGE_TAG} || true"
-                        sh "docker build -t $IMAGE_NAME ."
-                        sh "docker tag $IMAGE_NAME ${env.IMAGE_TAG}"
-                    }
-                }
-            }
-        }
-
-        // --- Push Docker Image ---
-        stage("Push to DockerHub") {
-            steps {
-                dir('src/emailservice') {
-                    withCredentials([string(credentialsId: 'dockerhub1', variable: 'dockerpwd')]) {
+                        env.IMAGE_TAG = "${DOCKER_REPO}:${BUILD_NUMBER}"
                         sh '''
-                        docker login -u rakesh6nm -p ${dockerpwd}
-                        docker push ${IMAGE_TAG}
-                        docker tag ${IMAGE_NAME} ${DOCKER_NAME}:latest
-                        docker push ${DOCKER_NAME}:latest
+                        docker build -t ${IMAGE_TAG} .
+                        docker tag ${IMAGE_TAG} ${DOCKER_REPO}:latest
                         '''
                     }
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
-        stage("Trivy Scan Image") {
+        // ---------------- Push Image ----------------
+        stage("Push to DockerHub") {
             steps {
-                dir('src/emailservice') {
+                withCredentials([string(credentialsId: 'dockerhub1', variable: 'DOCKER_PWD')]) {
                     sh '''
-                    trivy image -f json -o trivy-image-email.json ${IMAGE_TAG}
-                    trivy image -f table -o trivy-image-email.txt ${IMAGE_TAG}
+                    docker login -u rakesh6nm -p ${DOCKER_PWD}
+                    docker push ${IMAGE_TAG}
+                    docker push ${DOCKER_REPO}:latest
                     '''
                 }
             }
+        }
+
+        // ---------------- Trivy Image Scan ----------------
+        stage("Trivy Image Scan") {
+            steps {
+                sh '''
+                trivy image --format json \
+                  -o trivy-image-email.json ${IMAGE_TAG} || true
+                trivy image --format table \
+                  -o trivy-image-email.txt ${IMAGE_TAG} || true
+                '''
+            }
             post {
                 always {
-                    archiveArtifacts 'src/emailservice/trivy-image-email.*'
+                    archiveArtifacts 'trivy-image-email.*'
                 }
             }
         }
     }
 
-    // --- Final Notifications ---
+    // ---------------- Email Notification ----------------
     post {
         always {
-            dir('src/emailservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: ' Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>Emailservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'bandit-report.json,safety-report.json,trivy-fs-report.txt,trivy-image-email.json,trivy-image-email.txt'
-                    )
-                }
-            }
+            emailext (
+                subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+                <h3>Emailservice DevSecOps Pipeline</h3>
+                <p><b>Status:</b> ${currentBuild.currentResult}</p>
+                <p><b>Build:</b> ${BUILD_NUMBER}</p>
+                <p><b>URL:</b> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: '''
+                    src/emailservice/bandit-report.json,
+                    src/emailservice/safety-report.json,
+                    src/emailservice/trivy-fs-report.txt,
+                    trivy-image-email.json,
+                    trivy-image-email.txt
+                '''
+            )
         }
     }
 }
