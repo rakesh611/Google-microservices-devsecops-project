@@ -22,8 +22,7 @@ pipeline {
 
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
@@ -62,7 +61,6 @@ pipeline {
         stage("Install Dependencies & npm Audit") {
             steps {
                 dir('src/paymentservice') {
-                    // Install dependencies without executing post-install scripts
                     sh 'npm ci --ignore-scripts || true'
 
                     script {
