@@ -19,18 +19,12 @@ pipeline {
 
     stages {
 
-        /* =========================
-           CLEAN
-        ========================= */
         stage("Clean Workspace") {
             steps {
                 cleanWs()
             }
         }
 
-        /* =========================
-           CHECKOUT
-        ========================= */
         stage("Git Checkout") {
             steps {
                 git branch: 'main',
@@ -38,9 +32,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           SONARQUBE ANALYSIS
-        ========================= */
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
@@ -58,26 +49,19 @@ pipeline {
             }
         }
 
-        /* =========================
-           QUALITY GATE
-           (security enforced, coverage optional)
-        ========================= */
         stage("Quality Gate") {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
                         def qg = waitForQualityGate abortPipeline: false
                         if (qg.status != 'OK') {
-                            echo "⚠️ Quality Gate status: ${qg.status} (Pipeline continuing)"
+                            echo "⚠️ Quality Gate status: ${qg.status} (ignored for local test)"
                         }
                     }
                 }
             }
         }
 
-        /* =========================
-           INSTALL DEPENDENCIES
-        ========================= */
         stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
@@ -87,15 +71,18 @@ pipeline {
         }
 
         /* =========================
-           OWASP DEPENDENCY CHECK
+           OWASP Dependency Check
+           (LOCAL MODE – NO NVD KEY)
         ========================= */
-        stage("OWASP Dependency Check") {
+        stage("OWASP Dependency Check (Local)") {
             steps {
                 dir('src/paymentservice') {
                     dependencyCheck additionalArguments: '''
                         --scan .
+                        --noupdate
                         --disableYarnAudit
                         --disableNodeAudit
+                        --format XML
                     ''',
                     odcInstallation: 'dp-check'
 
@@ -110,9 +97,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           TRIVY FILESYSTEM SCAN
-        ========================= */
         stage("Trivy File Scan") {
             steps {
                 dir('src/paymentservice') {
@@ -132,9 +116,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           DOCKER BUILD
-        ========================= */
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
@@ -147,9 +128,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           DOCKER PUSH
-        ========================= */
         stage("Push Image to DockerHub") {
             steps {
                 dir('src/paymentservice') {
@@ -166,9 +144,6 @@ pipeline {
             }
         }
 
-        /* =========================
-           TRIVY IMAGE SCAN
-        ========================= */
         stage("Trivy Image Scan") {
             steps {
                 dir('src/paymentservice') {
@@ -187,9 +162,6 @@ pipeline {
         }
     }
 
-    /* =========================
-       EMAIL NOTIFICATION
-    ========================= */
     post {
         always {
             emailext(
