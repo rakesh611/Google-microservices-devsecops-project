@@ -132,7 +132,7 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: 'dockerhub1', variable: 'DOCKER_TOKEN')]) {
                     sh '''
-                    docker login -u rakesh6nm -p ${DOCKER_TOKEN}
+                    echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
                     docker push ${IMAGE_TAG}
                     docker push ${DOCKER_REPO}:latest
                     '''
