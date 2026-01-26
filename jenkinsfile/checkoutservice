@@ -1,3 +1,6 @@
+// Declare dockerImage globally
+def dockerImage
+
 pipeline {
     agent any
 
@@ -7,36 +10,40 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar'
+
+        // Docker
         DOCKER_USER  = 'rakesh6nm'
-        IMAGE_NAME   = 'currencyservice'
+        IMAGE_NAME   = 'checkoutservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
 
+        // ================= CLEAN =================
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
+        // ================= CHECKOUT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
-        /* ---------------- SAST : GOSEC ---------------- */
+        // ================= SAST: GOSEC =================
         stage('Go Security Scan (gosec)') {
             steps {
                 dir('src/checkoutservice') {
                     sh '''
                     export PATH="$PATH:$(go env GOPATH)/bin"
-
                     if ! command -v gosec &>/dev/null; then
                         go install github.com/securego/gosec/v2/cmd/gosec@latest
                     fi
-
                     gosec -fmt=sonarqube -out gosec-report.json -no-fail ./...
                     '''
                 }
@@ -48,7 +55,7 @@ pipeline {
             }
         }
 
-        /* ---------------- SONAR ---------------- */
+        // ================= SONAR =================
         stage("SonarQube Analysis") {
             steps {
                 dir('src/checkoutservice') {
@@ -66,7 +73,15 @@ pipeline {
             }
         }
 
-        /* ---------------- BUILD & TEST ---------------- */
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ================= BUILD & TEST =================
         stage('Go Build') {
             steps {
                 dir('src/checkoutservice') {
@@ -83,33 +98,33 @@ pipeline {
             }
         }
 
-        /* ---------------- SCA : GOVULNCHECK ---------------- */
+        // ================= SCA: GOVULNCHECK =================
         stage('Go Dependency Check (govulncheck)') {
             steps {
                 dir('src/checkoutservice') {
                     sh '''
                     export PATH="$PATH:$(go env GOPATH)/bin"
-
                     if ! command -v govulncheck &>/dev/null; then
                         go install golang.org/x/vuln/cmd/govulncheck@latest
                     fi
-
                     govulncheck ./... || true
                     '''
                 }
             }
         }
 
-        /* ---------------- TRIVY FS ---------------- */
+        // ================= TRIVY FS =================
         stage("Trivy File Scan") {
             steps {
-                dir('src/checkoutservice') {
-                    sh '''
-                    trivy fs . \
-                      --severity CRITICAL,HIGH \
-                      --scanners vuln,misconfig,secret \
-                      > trivy-fs-report.txt || true
-                    '''
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dir('src/checkoutservice') {
+                        sh '''
+                        trivy fs . \
+                          --severity CRITICAL,HIGH \
+                          --scanners vuln,misconfig,secret \
+                          -o trivy-fs-report.txt || true
+                        '''
+                    }
                 }
             }
             post {
@@ -119,50 +134,40 @@ pipeline {
             }
         }
 
-        /* ---------------- DOCKER BUILD ---------------- */
+        // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
                 dir('src/checkoutservice') {
-                    sh """
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
-                    """
-                }
-            }
-        }
-
-        /* ---------------- DOCKER PUSH ---------------- */
-        stage("Build & Push Docker Image") {
-            steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                        def img = docker.image("${FULL_IMAGE}")
-                        img.push()
-                        img.push("latest")
+                    script {
+                        dockerImage = docker.build("${FULL_IMAGE}")
+                        dockerImage.tag("latest")
                     }
                 }
             }
         }
 
-        /* ---------------- TRIVY IMAGE (FIXED) ---------------- */
-        stage("Trivy Scan Image") {
+        // ================= DOCKER PUSH =================
+        stage("Push Docker Image") {
             steps {
-                dir('src/checkoutservice') {
-                    sh """
-                    echo '🔍 Running Trivy scan on ${FULL_IMAGE}'
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        dockerImage.push("${IMAGE_TAG}")
+                        dockerImage.push("latest")
+                    }
+                }
+            }
+        }
 
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      -f json \
-                      -o trivy-image-checkoutservice.json \
-                      ${FULL_IMAGE}
-
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      -f table \
-                      -o trivy-image-checkoutservice.txt \
-                      ${FULL_IMAGE}
-                    """
+        // ================= TRIVY IMAGE SCAN =================
+        stage("Trivy Image Scan") {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dir('src/checkoutservice') {
+                        sh """
+                        trivy image --severity HIGH,CRITICAL -f json -o trivy-image-checkoutservice.json ${FULL_IMAGE}
+                        trivy image --severity HIGH,CRITICAL -f table -o trivy-image-checkoutservice.txt ${FULL_IMAGE}
+                        """
+                    }
                 }
             }
             post {
@@ -171,23 +176,52 @@ pipeline {
                 }
             }
         }
+
+        // ================= GITOPS UPDATE =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        echo "Updating checkoutservice deployment image to ${FULL_IMAGE}"
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/checkoutservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/checkoutservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy checkoutservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
+                }
+            }
+        }
+
     }
 
-    /* ---------------- EMAIL ---------------- */
+    // ================= EMAIL =================
     post {
         always {
-            emailext (
-                subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                    <p><b>Checkoutservice DevSecOps Pipeline</b></p>
-                    <p>Status: ${currentBuild.currentResult}</p>
-                    <p>Image: ${FULL_IMAGE}</p>
-                    <p><a href="${env.BUILD_URL}">Build URL</a></p>
-                """,
-                to: 'jharakesh485@gmail.com',
-                mimeType: 'text/html',
-                attachmentsPattern: '**/trivy-*.txt,**/trivy-*.json,**/gosec-report.json'
-            )
+            script {
+                def buildStatus = currentBuild.currentResult
+                def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'GitHub User'
+
+                emailext(
+                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                        <p><b>Checkoutservice DevSecOps Pipeline</b></p>
+                        <p>Status: ${buildStatus}</p>
+                        <p>Docker Image: ${FULL_IMAGE}</p>
+                        <p>Triggered By: ${buildUser}</p>
+                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    """,
+                    to: 'jharakesh485@gmail.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: '**/trivy-*.txt,**/trivy-*.json,**/gosec-report.json'
+                )
+            }
         }
     }
 }
