@@ -1,3 +1,4 @@
+// Declare dockerImage globally
 def dockerImage
 
 pipeline {
@@ -15,8 +16,7 @@ pipeline {
         IMAGE_TAG   = "${BUILD_NUMBER}"
 
         // GitOps
-        GITOPS_REPO = 'git@github.com:rakesh611/complete-prodcution-pipeline.git'
-        GITOPS_DIR  = 'gitops'
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
@@ -35,7 +35,8 @@ pipeline {
                         --severity CRITICAL,HIGH \
                         --scanners vuln,misconfig,secret \
                         --format table \
-                        --output trivy-fs-report.txt
+                        --output trivy-fs-report.txt \
+                        --exit-code 1
                     '''
                 }
             }
@@ -75,27 +76,27 @@ pipeline {
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        cd Google-microservices-devsecops-project/k8s/adservice
-
                         echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
-                        sed -i "s|image: ${IMAGE_NAME}:.*|image: ${IMAGE_FULL}:${IMAGE_TAG}|" deployment.yaml
+                        sed -i "s|image: ${IMAGE_NAME}:.*|image: ${IMAGE_FULL}:${IMAGE_TAG}|" Google-microservices-devsecops-project/k8s/adservice/deployment.yaml
 
-                        git config user.email "jharakesh485@gmail.com"
-                        git config user.name "Rakesh Jha"
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
-                        git add deployment.yaml
-                        git commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
+                        git -C Google-microservices-devsecops-project add k8s/adservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
 
-                        git push origin main
+                        git -C Google-microservices-devsecops-project push origin main
                     """
                 }
             }
         }
+
     }
 
     post {
         always {
             script {
+                // Send email only if Trivy report exists
                 if (fileExists('src/adservice/trivy-fs-report.txt')) {
                     emailext(
                         subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -111,6 +112,12 @@ pipeline {
                         attachmentsPattern: 'src/adservice/trivy-fs-report.txt'
                     )
                 }
+            }
+        }
+
+        failure {
+            script {
+                echo "Pipeline failed. Please check Trivy report or Docker push."
             }
         }
     }
