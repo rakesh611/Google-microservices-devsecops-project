@@ -1,3 +1,6 @@
+// Declare dockerImage globally
+def dockerImage
+
 pipeline {
     agent any
 
@@ -8,30 +11,32 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar'
+
+        // Docker
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'currencyservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
 
-        // ---------- Clean ----------
+        // ================= CLEAN =================
         stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
-        // ---------- Git ----------
+        // ================= GIT CHECKOUT =================
         stage('Git Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
-        // ---------- SonarQube ----------
+        // ================= SONARQUBE =================
         stage('SonarQube Analysis') {
             steps {
                 dir('src/currencyservice') {
@@ -53,7 +58,7 @@ pipeline {
             }
         }
 
-        // ---------- Dependencies ----------
+        // ================= INSTALL DEPENDENCIES =================
         stage('Install Dependencies') {
             steps {
                 dir('src/currencyservice') {
@@ -62,13 +67,12 @@ pipeline {
             }
         }
 
-        // ---------- Trivy FS Scan ----------
+        // ================= TRIVY FS SCAN =================
         stage('Trivy File System Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     dir('src/currencyservice') {
                         sh '''
-                        echo "Running Trivy FS scan..."
                         trivy fs . \
                           --severity HIGH,CRITICAL \
                           --scanners vuln,misconfig,secret \
@@ -80,70 +84,104 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'src/currencyservice/trivy-fs-currency.txt',
-                                     allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'src/currencyservice/trivy-fs-currency.txt', allowEmptyArchive: true
                 }
             }
         }
 
-        // ---------- Docker Build ----------
+        // ================= DOCKER BUILD =================
         stage('Build Docker Image') {
             steps {
                 dir('src/currencyservice') {
-                    sh '''
-                      docker rmi -f ${FULL_IMAGE} || true
-                      docker build -t ${FULL_IMAGE} .
-                    '''
-                }
-            }
-        }
-
-        // ---------- Docker Push ----------
-        stage('Push Docker Image') {
-            steps {
-                script {
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'dockerhub1'
-                    ) {
-                        def img = docker.image("${FULL_IMAGE}")
-                        img.push()
-                        img.push("latest")
+                    script {
+                        dockerImage = docker.build("${FULL_IMAGE}")
+                        dockerImage.tag("latest")
                     }
                 }
             }
         }
 
-        // ---------- Trivy Image Scan ----------
+        // ================= DOCKER PUSH =================
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        dockerImage.push("${IMAGE_TAG}")
+                        dockerImage.push("latest")
+                    }
+                }
+            }
+        }
+
+        // ================= TRIVY IMAGE SCAN =================
         stage('Trivy Image Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
-                    echo "Running Trivy Image scan..."
                     trivy image ${FULL_IMAGE} \
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
-                      --scanners vuln \
-                      -f table \
-                      -o trivy-image-currency.txt || true
+                      -f table -o trivy-image-currency.txt || true
 
                     trivy image ${FULL_IMAGE} \
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
-                      --scanners vuln \
-                      -f json \
-                      -o trivy-image-currency.json || true
+                      -f json -o trivy-image-currency.json || true
                     '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'trivy-image-currency.*',
-                                     fingerprint: true,
-                                     allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'trivy-image-currency.*', fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+
+        // ================= GITOPS UPDATE =================
+        stage('Update GitOps Deployment') {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        echo "Updating currencyservice deployment image to ${FULL_IMAGE}"
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/currencyservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/currencyservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy currencyservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
                 }
             }
         }
 
     } // stages
+
+    // ================= EMAIL NOTIFICATION =================
+    post {
+        always {
+            script {
+                def buildStatus = currentBuild.currentResult
+                def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'GitHub User'
+
+                emailext(
+                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                        <p><b>Currencyservice DevSecOps Pipeline</b></p>
+                        <p>Status: ${buildStatus}</p>
+                        <p>Docker Image: ${FULL_IMAGE}</p>
+                        <p>Triggered By: ${buildUser}</p>
+                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    """,
+                    to: 'jharakesh485@gmail.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: '**/trivy-*.txt,**/trivy-*.json'
+                )
+            }
+        }
+    }
 }
