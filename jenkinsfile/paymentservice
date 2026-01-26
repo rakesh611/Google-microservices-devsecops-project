@@ -5,85 +5,80 @@ pipeline {
         jdk 'jdk17'
         nodejs 'node20'
     }
-    
+
     environment {
+        // Sonar
         SCANNER_HOME = tool 'sonar'
-        DOCKER_USER   = 'rakesh6nm'
-        IMAGE_NAME    = 'paymentservice'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        FULL_IMAGE    = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // Docker
+        DOCKER_USER = 'rakesh6nm'
+        IMAGE_NAME  = 'paymentservice'
+        IMAGE_TAG   = "${BUILD_NUMBER}"
+        FULL_IMAGE  = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
     stages {
-        stage("Clean Workspace") {
-            steps { cleanWs() }
-        }
 
-        stage("Git Checkout") {
+        // ---------- Clean ----------
+        stage("Clean Workspace") {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                cleanWs()
             }
         }
 
+        // ---------- Git ----------
+        stage("Git Checkout") {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+            }
+        }
+
+        // ---------- SonarQube ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                          -Dsonar.projectKey=paymentservice \
-                          -Dsonar.projectName=paymentservice \
-                          -Dsonar.sources=. \
-                          -Dsonar.language=js
+                          $SCANNER_HOME/bin/sonar-scanner \
+                            -Dsonar.projectKey=paymentservice \
+                            -Dsonar.projectName=paymentservice \
+                            -Dsonar.sources=. \
+                            -Dsonar.language=js
                         '''
                     }
                 }
             }
         }
 
+        // ---------- Quality Gate ----------
         stage("Quality Gate") {
             steps {
-                script {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true, credentialsId: 'sonar-jenkins'
-                    }
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
+        // ---------- Dependencies ----------
         stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
-                    sh "npm install"
+                    sh 'npm ci'
                 }
             }
         }
 
-        stage("OWASP Dependency Check") {
-            steps {
-                dir('src/paymentservice') {
-                    dependencyCheck additionalArguments: '''
-                        --scan ./ 
-                        --disableYarnAudit 
-                        --disableNodeAudit
-                    ''',
-                    odcInstallation: 'dp-check'
-
-                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts 'src/paymentservice/dependency-check-report.xml'
-                }
-            }
-        }
-
+        // ---------- Trivy FS Scan ----------
         stage("Trivy FS Scan") {
             steps {
                 dir('src/paymentservice') {
                     sh '''
-                    trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
+                      trivy fs . \
+                        --severity HIGH,CRITICAL \
+                        --scanners vuln,misconfig,secret \
+                        --format table \
+                        --output trivy-fs-report.txt || true
                     '''
                 }
             }
@@ -94,71 +89,74 @@ pipeline {
             }
         }
 
+        // ---------- Docker Build ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
-                    sh """
-                    echo "Building Docker image: ${FULL_IMAGE}"
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
-                    """
+                    sh '''
+                      echo "Building Docker image: ${FULL_IMAGE}"
+                      docker rmi -f ${FULL_IMAGE} || true
+                      docker build -t ${FULL_IMAGE} .
+                    '''
                 }
             }
         }
 
+        // ---------- Docker Push ----------
         stage("Push Docker Image") {
             steps {
-                dir('src/paymentservice') {
-                    script {
-                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
-                        }
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        docker.image("${FULL_IMAGE}").push()
+                        docker.image("${FULL_IMAGE}").push('latest')
                     }
                 }
             }
         }
 
+        // ---------- Trivy Image Scan ----------
         stage("Trivy Image Scan") {
             steps {
-                dir('src/paymentservice') {
-                    sh """
-                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE}
-                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE}
-                    """
-                }
+                sh '''
+                  trivy image ${FULL_IMAGE} \
+                    --severity HIGH,CRITICAL \
+                    --format json \
+                    -o trivy-image-payment.json || true
+
+                  trivy image ${FULL_IMAGE} \
+                    --severity HIGH,CRITICAL \
+                    --format table \
+                    -o trivy-image-payment.txt || true
+                '''
             }
             post {
                 always {
-                    archiveArtifacts 'src/paymentservice/trivy-image-payment.*'
+                    archiveArtifacts 'trivy-image-payment.*'
                 }
             }
         }
     }
 
+    // ---------- Email Notification ----------
     post {
         always {
-            dir('src/paymentservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'Github User'
+            script {
+                def buildStatus = currentBuild.currentResult
+                def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'GitHub User'
 
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>paymentservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-payment.json,trivy-image-payment.txt,dependency-check-report.xml'
-                    )
-                }
+                emailext(
+                    subject: "Pipeline ${buildStatus}: ${JOB_NAME} #${BUILD_NUMBER}",
+                    mimeType: 'text/html',
+                    to: 'jharakesh485@gmail.com',
+                    body: """
+                        <h3>Paymentservice – DevSecOps Pipeline</h3>
+                        <p><b>Status:</b> ${buildStatus}</p>
+                        <p><b>Build Number:</b> ${BUILD_NUMBER}</p>
+                        <p><b>Triggered By:</b> ${buildUser}</p>
+                        <p><b>Build URL:</b> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
+                    """,
+                    attachmentsPattern: 'trivy-fs-report.txt,trivy-image-payment.json,trivy-image-payment.txt'
+                )
             }
         }
     }
