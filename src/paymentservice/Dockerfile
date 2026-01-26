@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 # ---------- Builder ----------
 FROM base AS builder
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev   # installs only production dependencies safely
 COPY index.js ./
 # COPY src ./src   # Uncomment if needed
 # COPY config ./config   # Uncomment if needed
@@ -14,7 +14,7 @@ COPY index.js ./
 FROM node:20-alpine AS runtime
 WORKDIR /usr/src/app
 
-# Copy node_modules and main files from builder
+# Copy only node_modules and main files from builder
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/index.js ./index.js
 # COPY --from=builder /usr/src/app/src ./src   # Uncomment if needed
