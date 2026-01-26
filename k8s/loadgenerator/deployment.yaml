@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: loadgenerator
-          image: rakesh6nm/loadgenerator:latest  # Updated automatically by Jenkins GitOps
+          image: rakesh6nm/loadgenerator:3
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
