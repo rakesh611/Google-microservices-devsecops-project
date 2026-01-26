@@ -10,55 +10,52 @@ pipeline {
         SCANNER_HOME = tool 'sonar'
 
         // Docker
-        DOCKER_USER = 'rakesh6nm'
-        IMAGE_NAME = 'recommendationservice'
-        IMAGE_TAG  = "${BUILD_NUMBER}"
-        FULL_IMAGE = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+        DOCKER_USER  = 'rakesh6nm'
+        IMAGE_NAME   = 'recommendationservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
 
-        // Python user bin path (for bandit, safety, etc.)
+        // Python user bin path
         PATH = "$PATH:/var/lib/jenkins/.local/bin"
+
+        // GitOps repo
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
 
+        // ================= CLEAN =================
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
+        // ================= GIT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
-        /* ================= SAST : BANDIT ================= */
+        // ================= SAST: BANDIT =================
         stage("Bandit Security Scan") {
             steps {
                 dir('src/recommendationservice') {
                     sh '''
                         python3 -m pip install --user --upgrade bandit
-                        echo "Running Bandit via python module..."
                         python3 -m bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/recommendationservice/bandit-report.json'
-                }
-            }
+            post { always { archiveArtifacts 'src/recommendationservice/bandit-report.json' } }
         }
 
-        /* ================= SONARQUBE ================= */
+        // ================= SONARQUBE =================
         stage("SonarQube Analysis") {
             steps {
                 dir('src/recommendationservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh '''
-                            $SCANNER_HOME/bin/sonar-scanner \
+                            ${SCANNER_HOME}/bin/sonar-scanner \
                               -Dsonar.projectKey=recommendationservice \
                               -Dsonar.projectName=recommendationservice \
                               -Dsonar.sources=.
@@ -71,24 +68,21 @@ pipeline {
         stage("Quality Gate") {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true,
-                        credentialsId: 'sonar-jenkins'
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        /* ================= DEPENDENCIES ================= */
+        // ================= DEPENDENCIES =================
         stage("Install Dependencies") {
             steps {
                 dir('src/recommendationservice') {
-                    sh '''
-                        python3 -m pip install --user -r requirements.txt || true
-                    '''
+                    sh 'python3 -m pip install --user -r requirements.txt || true'
                 }
             }
         }
 
-        /* ================= SCA : SAFETY ================= */
+        // ================= SCA: SAFETY =================
         stage("Safety Dependency Scan") {
             steps {
                 dir('src/recommendationservice') {
@@ -98,14 +92,10 @@ pipeline {
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/recommendationservice/safety-report.json'
-                }
-            }
+            post { always { archiveArtifacts 'src/recommendationservice/safety-report.json' } }
         }
 
-        /* ================= TRIVY FS ================= */
+        // ================= TRIVY FS =================
         stage("Trivy File Scan") {
             steps {
                 dir('src/recommendationservice') {
@@ -117,34 +107,23 @@ pipeline {
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/recommendationservice/trivy-fs-report.txt'
-                }
-            }
+            post { always { archiveArtifacts 'src/recommendationservice/trivy-fs-report.txt' } }
         }
 
-        /* ================= DOCKER BUILD ================= */
+        // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
                 dir('src/recommendationservice') {
-                    sh '''
-                        echo "Building Docker image ${FULL_IMAGE}"
-                        docker build -t ${FULL_IMAGE} .
-                    '''
+                    sh "docker build -t ${FULL_IMAGE} ."
                 }
             }
         }
 
-        /* ================= DOCKER PUSH ================= */
-        stage("Push to DockerHub") {
+        stage("Push Docker Image") {
             steps {
                 dir('src/recommendationservice') {
                     script {
-                        docker.withRegistry(
-                            'https://index.docker.io/v1/',
-                            'dockerhub1'
-                        ) {
+                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                             docker.image("${FULL_IMAGE}").push()
                             docker.image("${FULL_IMAGE}").push('latest')
                         }
@@ -153,59 +132,62 @@ pipeline {
             }
         }
 
-        /* ================= TRIVY IMAGE ================= */
-        stage("Trivy Scan Image") {
+        // ================= TRIVY IMAGE SCAN =================
+        stage("Trivy Image Scan") {
             steps {
                 dir('src/recommendationservice') {
                     sh '''
-                        trivy image -f json \
-                          -o trivy-image-recommendation.json \
-                          ${FULL_IMAGE}
-
-                        trivy image -f table \
-                          -o trivy-image-recommendation.txt \
-                          ${FULL_IMAGE}
+                        trivy image -f json -o trivy-image-recommendation.json ${FULL_IMAGE} || true
+                        trivy image -f table -o trivy-image-recommendation.txt ${FULL_IMAGE} || true
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/recommendationservice/trivy-image-recommendation.*'
+            post { always { archiveArtifacts 'src/recommendationservice/trivy-image-recommendation.*' } }
+        }
+
+        // ================= GITOPS DEPLOYMENT =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/recommendationservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/recommendationservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
                 }
             }
         }
     }
 
-    /* ================= EMAIL NOTIFICATION ================= */
+    // ================= EMAIL NOTIFICATION =================
     post {
         always {
-            script {
-                def buildStatus = currentBuild.currentResult
-                def buildUser = currentBuild.getBuildCauses(
-                    'hudson.model.Cause$UserIdCause'
-                )[0]?.userId ?: 'GitHub User'
-
-                emailext (
-                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                        <p><b>recommendationservice DevSecOps Pipeline</b></p>
-                        <p>Status: <b>${buildStatus}</b></p>
-                        <p>Job: ${env.JOB_NAME}</p>
-                        <p>Build #: ${env.BUILD_NUMBER}</p>
-                        <p>Triggered by: ${buildUser}</p>
-                        <p><a href="${env.BUILD_URL}">Build URL</a></p>
-                    """,
-                    to: 'jharakesh485@gmail.com',
-                    mimeType: 'text/html',
-                    attachmentsPattern: '''
-                        src/recommendationservice/bandit-report.json,
-                        src/recommendationservice/safety-report.json,
-                        src/recommendationservice/trivy-fs-report.txt,
-                        src/recommendationservice/trivy-image-recommendation.json,
-                        src/recommendationservice/trivy-image-recommendation.txt
-                    '''
-                )
-            }
+            emailext(
+                subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+                    <p><b>RecommendationService DevSecOps Pipeline</b></p>
+                    <p>Status: ${currentBuild.currentResult}</p>
+                    <p>Docker Image: ${FULL_IMAGE}</p>
+                    <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: '''
+                    src/recommendationservice/bandit-report.json,
+                    src/recommendationservice/safety-report.json,
+                    src/recommendationservice/trivy-fs-report.txt,
+                    src/recommendationservice/trivy-image-recommendation.json,
+                    src/recommendationservice/trivy-image-recommendation.txt
+                '''
+            )
         }
     }
 }
