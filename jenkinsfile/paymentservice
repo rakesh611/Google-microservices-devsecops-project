@@ -8,9 +8,10 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_USER   = 'rakesh6nm'
-        IMAGE_NAME    = 'paymentservice'
-        FULL_IMAGE    = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
+        DOCKER_NAME  = 'rakesh6nm/paymentservice'
+        IMAGE_NAME   = 'paymentservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
     stages {
@@ -24,6 +25,7 @@ pipeline {
             }
         }
 
+        // --- SAST: SonarQube Analysis ---
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
@@ -40,7 +42,7 @@ pipeline {
             }
         }
 
-        // ---------------- Trivy FS Scan ----------------
+        // --- Trivy File Scan ---
         stage("Trivy File Scan") {
             steps {
                 dir('src/paymentservice') {
@@ -56,21 +58,22 @@ pipeline {
             }
         }
 
-        // ---------------- Build Docker Image ----------------
+        // --- Build Docker Image ---
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
-                    sh """
-                    echo "Building Docker image: ${FULL_IMAGE}"
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
-                    """
+                    script {
+                        sh """
+                        docker rmi -f ${FULL_IMAGE} || true
+                        docker build -t ${FULL_IMAGE} .
+                        """
+                    }
                 }
             }
         }
 
-        // ---------------- Push Docker Image ----------------
-        stage("Push to DockerHub") {
+        // --- Push Docker Image ---
+        stage("Push DockerHub") {
             steps {
                 dir('src/paymentservice') {
                     script {
@@ -83,7 +86,7 @@ pipeline {
             }
         }
 
-        // ---------------- Trivy Image Scan ----------------
+        // --- Trivy Image Scan ---
         stage("Trivy Image Scan") {
             steps {
                 dir('src/paymentservice') {
@@ -101,6 +104,7 @@ pipeline {
         }
     }
 
+    // --- Post Build Notifications ---
     post {
         always {
             dir('src/paymentservice') {
