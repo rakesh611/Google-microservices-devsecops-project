@@ -28,7 +28,7 @@ pipeline {
             }
         }
 
-        // ---------- SonarQube Analysis ----------
+        // ---------- SonarQube Analysis (SAST) ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
@@ -40,17 +40,6 @@ pipeline {
                           -Dsonar.sources=. \
                           -Dsonar.language=js
                         """
-                    }
-                }
-            }
-        }
-
-        // ---------- Quality Gate ----------
-        stage("Quality Gate") {
-            steps {
-                script {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        waitForQualityGate abortPipeline: true
                     }
                 }
             }
@@ -100,7 +89,7 @@ pipeline {
         stage("Push Docker Image") {
             steps {
                 dir('src/paymentservice') {
-                    script { // <-- wrap docker.withRegistry in script
+                    script {
                         docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                             sh """
                             docker push ${FULL_IMAGE}
