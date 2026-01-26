@@ -5,13 +5,11 @@ pipeline {
         jdk 'jdk17'
         nodejs 'node20'
     }
-
+    
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_NAME  = 'rakesh6nm/paymentservice'
+        DOCKER_NAME  = 'rakesh6nm'
         IMAGE_NAME   = 'paymentservice'
-        IMAGE_TAG    = "${BUILD_NUMBER}"
-        FULL_IMAGE   = "${DOCKER_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
     }
 
     stages {
@@ -25,30 +23,36 @@ pipeline {
             }
         }
 
-        // --- SAST: SonarQube Analysis ---
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
                     withSonarQubeEnv('sonar-jenkins') {
-                        sh '''
+                        sh """
                         $SCANNER_HOME/bin/sonar-scanner \
                           -Dsonar.projectKey=paymentservice \
                           -Dsonar.projectName=paymentservice \
                           -Dsonar.sources=. \
                           -Dsonar.language=js
-                        '''
+                        """
                     }
                 }
             }
         }
 
-        // --- Trivy File Scan ---
-        stage("Trivy File Scan") {
+        stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
-                    sh '''
+                    sh "npm ci --only=production"
+                }
+            }
+        }
+
+        stage("Trivy FS Scan") {
+            steps {
+                dir('src/paymentservice') {
+                    sh """
                     trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
-                    '''
+                    """
                 }
             }
             post {
@@ -58,41 +62,41 @@ pipeline {
             }
         }
 
-        // --- Build Docker Image ---
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     script {
-                        sh """
-                        docker rmi -f ${FULL_IMAGE} || true
-                        docker build -t ${FULL_IMAGE} .
-                        """
+                        env.FULL_IMAGE_TAG = "${DOCKER_NAME}/${IMAGE_NAME}:${BUILD_NUMBER}"
+                        env.LATEST_IMAGE_TAG = "${DOCKER_NAME}/${IMAGE_NAME}:latest"
+
+                        sh "docker build -t ${IMAGE_NAME} ."
+                        sh "docker tag ${IMAGE_NAME} ${FULL_IMAGE_TAG}"
                     }
                 }
             }
         }
 
-        // --- Push Docker Image ---
-        stage("Push DockerHub") {
+        stage("Push Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     script {
                         docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
+                            echo "Pushing image: ${FULL_IMAGE_TAG}"
+                            docker.image("${FULL_IMAGE_TAG}").push()
+                            echo "Pushing latest tag: ${LATEST_IMAGE_TAG}"
+                            docker.image("${LATEST_IMAGE_TAG}").push()
                         }
                     }
                 }
             }
         }
 
-        // --- Trivy Image Scan ---
         stage("Trivy Image Scan") {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE}
-                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE}
+                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE_TAG}
+                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE_TAG}
                     """
                 }
             }
@@ -104,7 +108,6 @@ pipeline {
         }
     }
 
-    // --- Post Build Notifications ---
     post {
         always {
             dir('src/paymentservice') {
