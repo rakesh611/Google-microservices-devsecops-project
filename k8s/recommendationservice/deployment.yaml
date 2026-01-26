@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: recommendationservice
-          image: rakesh6nm/recommendationservice:latest
+          image: rakesh6nm/recommendationservice:3
           ports:
             - containerPort: 5000
           resources:
