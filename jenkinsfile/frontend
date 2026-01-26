@@ -1,3 +1,6 @@
+// Declare dockerImage globally
+def dockerImage
+
 pipeline {
     agent any
 
@@ -8,33 +11,33 @@ pipeline {
     environment {
         SCANNER_HOME = tool 'sonar'
 
-        // Docker config (FIXED)
+        // Docker
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'frontend'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
 
         GO_BIN_PATH = '$(go env GOPATH)/bin'
     }
 
     stages {
 
+        // ================= CLEAN =================
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
+        // ================= GIT CHECKOUT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project/'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
-        /* =========================
-           SAST – GOSEC
-        ========================= */
+        // ================= SAST: GOSEC =================
         stage('Go Security Scan (gosec)') {
             steps {
                 dir('src/frontend') {
@@ -49,16 +52,10 @@ pipeline {
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/frontend/gosec-report.json'
-                }
-            }
+            post { always { archiveArtifacts 'src/frontend/gosec-report.json' } }
         }
 
-        /* =========================
-           SONARQUBE
-        ========================= */
+        // ================= SONARQUBE =================
         stage("SonarQube Analysis") {
             steps {
                 dir('src/frontend') {
@@ -79,21 +76,16 @@ pipeline {
         stage("Quality Gate") {
             steps {
                 timeout(time: 3, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true,
-                        credentialsId: 'sonar-jenkins'
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        /* =========================
-           BUILD & TEST
-        ========================= */
+        // ================= BUILD & TEST =================
         stage('Go Build') {
             steps {
                 dir('src/frontend') {
-                    sh '''
-                    CGO_ENABLED=0 go build -o app .
-                    '''
+                    sh 'CGO_ENABLED=0 go build -o app .'
                 }
             }
         }
@@ -101,16 +93,12 @@ pipeline {
         stage('Go Unit Tests') {
             steps {
                 dir('src/frontend') {
-                    sh '''
-                    go test -v -coverprofile=coverage.out ./...
-                    '''
+                    sh 'go test -v -coverprofile=coverage.out ./...'
                 }
             }
         }
 
-        /* =========================
-           SCA – GOVULNCHECK
-        ========================= */
+        // ================= SCA: GOVULNCHECK =================
         stage('Go Dependency Check (govulncheck)') {
             steps {
                 dir('src/frontend') {
@@ -127,9 +115,7 @@ pipeline {
             }
         }
 
-        /* =========================
-           TRIVY FS SCAN
-        ========================= */
+        // ================= TRIVY FS SCAN =================
         stage("Trivy File Scan") {
             steps {
                 dir('src/frontend') {
@@ -138,84 +124,83 @@ pipeline {
                       --severity CRITICAL,HIGH \
                       --scanners vuln,misconfig,secret \
                       --exit-code 1 \
-                      > trivy-fs-report.txt || true
+                      -o trivy-fs-report.txt || true
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/frontend/trivy-fs-report.txt'
-                }
-            }
+            post { always { archiveArtifacts 'src/frontend/trivy-fs-report.txt' } }
         }
 
-        /* =========================
-           DOCKER BUILD
-        ========================= */
+        // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
                 dir('src/frontend') {
-                    sh """
-                    echo "Building Docker image: ${FULL_IMAGE}"
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
-                    """
-                }
-            }
-        }
-
-        /* =========================
-           DOCKER PUSH (FIXED)
-        ========================= */
-        stage("Push Image to DockerHub") {
-            steps {
-                dir('src/frontend') {
                     script {
-                        docker.withRegistry(
-                            'https://index.docker.io/v1/',
-                            'dockerhub1'
-                        ) {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
-                        }
+                        dockerImage = docker.build("${FULL_IMAGE}")
+                        dockerImage.tag("latest")
                     }
                 }
             }
         }
 
-        /* =========================
-           TRIVY IMAGE SCAN
-        ========================= */
-        stage("Trivy Scan Image") {
+        // ================= DOCKER PUSH =================
+        stage("Push Docker Image") {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        dockerImage.push("${IMAGE_TAG}")
+                        dockerImage.push("latest")
+                    }
+                }
+            }
+        }
+
+        // ================= TRIVY IMAGE SCAN =================
+        stage("Trivy Image Scan") {
             steps {
                 dir('src/frontend') {
                     sh """
-                    trivy image -f json -o trivy-image-frontend.json ${FULL_IMAGE}
-                    trivy image -f table -o trivy-image-frontend.txt ${FULL_IMAGE}
+                    trivy image -f json -o trivy-image-frontend.json ${FULL_IMAGE} || true
+                    trivy image -f table -o trivy-image-frontend.txt ${FULL_IMAGE} || true
                     """
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/frontend/trivy-image-frontend.json, src/frontend/trivy-image-frontend.txt'
+            post { always { archiveArtifacts 'src/frontend/trivy-image-frontend.*' } }
+        }
+
+        // ================= GITOPS UPDATE =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        echo "Updating frontend deployment image to ${FULL_IMAGE}"
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/frontend/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/frontend/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy frontend ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
                 }
             }
         }
     }
 
-    /* =========================
-       EMAIL NOTIFICATION
-    ========================= */
+    // ================= EMAIL NOTIFICATION =================
     post {
         always {
             emailext(
                 subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                 body: """
-                <p><b>Frontend Google-Shop DevSecOps Pipeline</b></p>
+                <p><b>Frontend DevSecOps Pipeline</b></p>
                 <p>Status: ${currentBuild.currentResult}</p>
-                <p>Job: ${env.JOB_NAME}</p>
-                <p>Build: ${env.BUILD_NUMBER}</p>
-                <p><a href="${env.BUILD_URL}">View Build</a></p>
+                <p>Docker Image: ${FULL_IMAGE}</p>
+                <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                 """,
                 to: 'jharakesh485@gmail.com',
                 mimeType: 'text/html',
