@@ -21,13 +21,28 @@ pipeline {
 
     stages {
 
+        stage('Clean Workspace') {
+            steps { cleanWs() }
+        }
+
         stage('Checkout SCM') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Trivy FS Scan') { steps { dir('src/adservice') { sh ''' trivy fs . \ --severity CRITICAL,HIGH \ --scanners vuln,misconfig,secret \ --format table \ --output trivy-fs-report.txt ''' } }
+        stage('Trivy FS Scan') {
+            steps {
+                dir('src/adservice') {
+                    sh '''
+                        trivy fs . \
+                        --severity CRITICAL,HIGH \
+                        --scanners vuln,misconfig,secret \
+                        --format table \
+                        --output trivy-fs-report.txt
+                    '''
+                }
+            }
             post {
                 always {
                     archiveArtifacts artifacts: 'src/adservice/trivy-fs-report.txt', fingerprint: true
