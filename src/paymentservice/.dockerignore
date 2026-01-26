@@ -1,1 +1,19 @@
+.git
+.gitignore
+.env
+.env.*
 node_modules
+npm-debug.log
+Dockerfile
+docker-compose.yml
+
+# CI / Security reports
+trivy-*
+bandit-*
+dependency-check*
+sonar-project.properties
+.coverage
+coverage
+tests
+test
+docs
