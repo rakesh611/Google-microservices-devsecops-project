@@ -60,7 +60,7 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 dir('src/productcatalogservice') {
-                    withSonarQubeEnv('sonar-server') {
+                    withSonarQubeEnv('sonar-jenkins') {
                         sh '''
                             $SCANNER_HOME/bin/sonar-scanner \
                             -Dsonar.projectName=productcatalogservice \
