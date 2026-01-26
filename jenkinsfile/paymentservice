@@ -5,30 +5,41 @@ pipeline {
         jdk 'jdk17'
         nodejs 'node20'
     }
-    
+
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_NAME  = 'rakesh6nm'
+
+        // Docker config
+        DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'paymentservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO  = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
+
+        // ================= CLEAN =================
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
+        // ================= GIT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
+        // ================= SONARQUBE =================
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh """
-                        $SCANNER_HOME/bin/sonar-scanner \
+                        ${SCANNER_HOME}/bin/sonar-scanner \
                           -Dsonar.projectKey=paymentservice \
                           -Dsonar.projectName=paymentservice \
                           -Dsonar.sources=. \
@@ -39,6 +50,15 @@ pipeline {
             }
         }
 
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 3, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ================= DEPENDENCIES =================
         stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
@@ -47,27 +67,31 @@ pipeline {
             }
         }
 
+        // ================= TRIVY FS SCAN =================
         stage("Trivy FS Scan") {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy fs . --severity CRITICAL,HIGH --exit-code 1 --scanners vuln,misconfig,secret > trivy-fs-report.txt || true
+                    trivy fs . \
+                      --severity CRITICAL,HIGH \
+                      --scanners vuln,misconfig,secret \
+                      --exit-code 1 \
+                      -o trivy-fs-payment.txt || true
                     """
                 }
             }
             post {
-                always {
-                    archiveArtifacts 'src/paymentservice/trivy-fs-report.txt'
-                }
+                always { archiveArtifacts 'src/paymentservice/trivy-fs-payment.txt' }
             }
         }
 
+        // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     script {
-                        env.FULL_IMAGE_TAG = "${DOCKER_NAME}/${IMAGE_NAME}:${BUILD_NUMBER}"
-                        env.LATEST_IMAGE_TAG = "${DOCKER_NAME}/${IMAGE_NAME}:latest"
+                        env.FULL_IMAGE_TAG = "${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
+                        env.LATEST_IMAGE_TAG = "${DOCKER_USER}/${IMAGE_NAME}:latest"
 
                         sh "docker build -t ${IMAGE_NAME} ."
                         sh "docker tag ${IMAGE_NAME} ${FULL_IMAGE_TAG}"
@@ -76,14 +100,13 @@ pipeline {
             }
         }
 
+        // ================= DOCKER PUSH =================
         stage("Push Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     script {
                         docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            echo "Pushing image: ${FULL_IMAGE_TAG}"
                             docker.image("${FULL_IMAGE_TAG}").push()
-                            echo "Pushing latest tag: ${LATEST_IMAGE_TAG}"
                             docker.image("${LATEST_IMAGE_TAG}").push()
                         }
                     }
@@ -91,47 +114,59 @@ pipeline {
             }
         }
 
+        // ================= TRIVY IMAGE SCAN =================
         stage("Trivy Image Scan") {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE_TAG}
-                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE_TAG}
+                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE_TAG} || true
+                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE_TAG} || true
                     """
                 }
             }
             post {
-                always {
-                    archiveArtifacts 'src/paymentservice/trivy-image-payment.*'
+                always { archiveArtifacts 'src/paymentservice/trivy-image-payment.*' }
+            }
+        }
+
+        // ================= GITOPS DEPLOYMENT =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        echo "Updating paymentservice deployment image to ${FULL_IMAGE_TAG}"
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE_TAG}|" Google-microservices-devsecops-project/k8s/paymentservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/paymentservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy paymentservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
                 }
             }
         }
     }
 
+    // ================= EMAIL NOTIFICATION =================
     post {
         always {
-            dir('src/paymentservice') {
-                script {
-                    def buildStatus = currentBuild.currentResult
-                    def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'Github User'
-
-                    emailext (
-                        subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            <p>paymentservice Google-Shop DevSecOps pipeline status.</p>
-                            <p>Project: ${env.JOB_NAME}</p>
-                            <p>Build Number: ${env.BUILD_NUMBER}</p>
-                            <p>Build Status: ${buildStatus}</p>
-                            <p>Started by: ${buildUser}</p>
-                            <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                        """,
-                        to: 'jharakesh485@gmail.com',
-                        from: 'jharakesh485@gmail.com',
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'trivy-fs-report.txt,trivy-image-payment.json,trivy-image-payment.txt'
-                    )
-                }
-            }
+            emailext(
+                subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+                <p><b>PaymentService DevSecOps Pipeline</b></p>
+                <p>Status: ${currentBuild.currentResult}</p>
+                <p>Docker Image: ${FULL_IMAGE_TAG}</p>
+                <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: '**/trivy-fs-payment.txt, **/trivy-image-payment.*'
+            )
         }
     }
 }
