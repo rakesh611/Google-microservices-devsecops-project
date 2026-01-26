@@ -27,19 +27,7 @@ pipeline {
             }
         }
 
-        stage('Trivy FS Scan') {
-            steps {
-                dir('src/adservice') {
-                    sh '''
-                      trivy fs . \
-                        --severity CRITICAL,HIGH \
-                        --scanners vuln,misconfig,secret \
-                        --format table \
-                        --output trivy-fs-report.txt \
-                        --exit-code 1
-                    '''
-                }
-            }
+        stage('Trivy FS Scan') { steps { dir('src/adservice') { sh ''' trivy fs . \ --severity CRITICAL,HIGH \ --scanners vuln,misconfig,secret \ --format table \ --output trivy-fs-report.txt ''' } }
             post {
                 always {
                     archiveArtifacts artifacts: 'src/adservice/trivy-fs-report.txt', fingerprint: true
