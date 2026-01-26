@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: productcatalogservice
-          image: rakesh6nm/productcatalogservice:latest
+          image: rakesh6nm/productcatalogservice:3
           ports:
             - containerPort: 3000
           resources:
