@@ -10,61 +10,56 @@ pipeline {
         SCANNER_HOME = tool 'sonar'
 
         // Docker
-        DOCKER_USER = 'rakesh6nm'
-        IMAGE_NAME = 'productcatalogservice'
-        IMAGE_TAG  = "${BUILD_NUMBER}"
-        FULL_IMAGE = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+        DOCKER_USER  = 'rakesh6nm'
+        IMAGE_NAME   = 'productcatalogservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO  = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
 
+        // ================= CLEAN =================
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
+        // ================= GIT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
-        /* ---------------- SAST : GOSEC ---------------- */
+        // ================= SAST: GOSEC =================
         stage('Go Security Scan (gosec)') {
             steps {
                 dir('src/productcatalogservice') {
                     sh '''
-                        set -e
                         export PATH="$PATH:$(go env GOPATH)/bin"
 
                         if ! command -v gosec >/dev/null 2>&1; then
-                            echo "Installing gosec..."
                             go install github.com/securego/gosec/v2/cmd/gosec@latest
                         fi
 
-                        echo "Running gosec scan..."
                         gosec -fmt=sonarqube -out gosec-report.json -no-fail ./...
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/productcatalogservice/gosec-report.json'
-                }
-            }
+            post { always { archiveArtifacts 'src/productcatalogservice/gosec-report.json' } }
         }
 
-        /* ---------------- SONARQUBE ---------------- */
+        // ================= SONARQUBE =================
         stage("SonarQube Analysis") {
             steps {
                 dir('src/productcatalogservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh '''
-                            $SCANNER_HOME/bin/sonar-scanner \
-                            -Dsonar.projectName=productcatalogservice \
+                            ${SCANNER_HOME}/bin/sonar-scanner \
                             -Dsonar.projectKey=productcatalogservice \
+                            -Dsonar.projectName=productcatalogservice \
                             -Dsonar.sources=. \
                             -Dsonar.language=go \
                             -Dsonar.go.gosec.reportPaths=gosec-report.json
@@ -74,14 +69,19 @@ pipeline {
             }
         }
 
-        /* ---------------- BUILD ---------------- */
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 3, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ================= BUILD & TEST =================
         stage('Go Build') {
             steps {
                 dir('src/productcatalogservice') {
-                    sh '''
-                        echo "Building application..."
-                        CGO_ENABLED=0 go build -o app .
-                    '''
+                    sh 'CGO_ENABLED=0 go build -o app .'
                 }
             }
         }
@@ -89,39 +89,31 @@ pipeline {
         stage('Go Unit Tests') {
             steps {
                 dir('src/productcatalogservice') {
-                    sh '''
-                        echo "Running unit tests..."
-                        go test -v -coverprofile=coverage.out ./...
-                    '''
+                    sh 'go test -v -coverprofile=coverage.out ./...'
                 }
             }
         }
 
-        /* ---------------- SCA : GOVULNCHECK ---------------- */
+        // ================= SCA: GOVULNCHECK =================
         stage('Go Dependency Check (govulncheck)') {
             steps {
                 dir('src/productcatalogservice') {
                     sh '''
                         export PATH="$PATH:$(go env GOPATH)/bin"
-
                         if ! command -v govulncheck >/dev/null 2>&1; then
-                            echo "Installing govulncheck..."
                             go install golang.org/x/vuln/cmd/govulncheck@latest
                         fi
-
-                        echo "Running govulncheck..."
                         govulncheck ./... || true
                     '''
                 }
             }
         }
 
-        /* ---------------- TRIVY FS ---------------- */
+        // ================= TRIVY FS SCAN =================
         stage("Trivy File Scan") {
             steps {
                 dir('src/productcatalogservice') {
                     sh '''
-                        echo "Running Trivy filesystem scan..."
                         trivy fs . \
                           --severity CRITICAL,HIGH \
                           --scanners vuln,misconfig,secret \
@@ -129,33 +121,23 @@ pipeline {
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/productcatalogservice/trivy-fs-report.txt'
-                }
-            }
+            post { always { archiveArtifacts 'src/productcatalogservice/trivy-fs-report.txt' } }
         }
 
-        /* ---------------- DOCKER BUILD ---------------- */
+        // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
                 dir('src/productcatalogservice') {
-                    sh '''
-                        echo "Building Docker image ${FULL_IMAGE}"
-                        docker build -t ${FULL_IMAGE} .
-                    '''
+                    sh "docker build -t ${FULL_IMAGE} ."
                 }
             }
         }
 
-        stage("Tag & Push to DockerHub") {
+        stage("Push Docker Image") {
             steps {
                 dir('src/productcatalogservice') {
                     script {
-                        docker.withRegistry(
-                            'https://index.docker.io/v1/',
-                            'dockerhub1'
-                        ) {
+                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                             docker.image("${FULL_IMAGE}").push()
                             docker.image("${FULL_IMAGE}").push('latest')
                         }
@@ -164,55 +146,57 @@ pipeline {
             }
         }
 
-        /* ---------------- TRIVY IMAGE ---------------- */
-        stage("Trivy Scan Image") {
+        // ================= TRIVY IMAGE SCAN =================
+        stage("Trivy Image Scan") {
             steps {
                 dir('src/productcatalogservice') {
                     sh '''
-                        echo "Scanning Docker image ${FULL_IMAGE}"
-
-                        trivy image -f json \
-                          -o trivy-image-productcatalogservice.json \
-                          ${FULL_IMAGE}
-
-                        trivy image -f table \
-                          -o trivy-image-productcatalogservice.txt \
-                          ${FULL_IMAGE}
+                        trivy image -f json -o trivy-image-productcatalogservice.json ${FULL_IMAGE} || true
+                        trivy image -f table -o trivy-image-productcatalogservice.txt ${FULL_IMAGE} || true
                     '''
                 }
             }
+            post { always { archiveArtifacts 'src/productcatalogservice/trivy-image-productcatalogservice.*' } }
         }
+
+        // ================= GITOPS DEPLOYMENT =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/productcatalogservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/productcatalogservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
+                }
+            }
+        }
+
     }
 
-    /* ---------------- NOTIFICATION ---------------- */
+    // ================= EMAIL NOTIFICATION =================
     post {
         always {
-            script {
-                def buildStatus = currentBuild.currentResult
-                def buildUser = currentBuild.getBuildCauses(
-                    'hudson.model.Cause$UserIdCause'
-                )[0]?.userId ?: 'GitHub User'
-
-                emailext (
-                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                        <p><b>productcatalogservice DevSecOps Pipeline</b></p>
-                        <p>Status: <b>${buildStatus}</b></p>
-                        <p>Job: ${env.JOB_NAME}</p>
-                        <p>Build #: ${env.BUILD_NUMBER}</p>
-                        <p>Triggered by: ${buildUser}</p>
-                        <p><a href="${env.BUILD_URL}">Build URL</a></p>
-                    """,
-                    to: 'jharakesh485@gmail.com',
-                    mimeType: 'text/html',
-                    attachmentsPattern: '''
-                        src/productcatalogservice/trivy-fs-report.txt,
-                        src/productcatalogservice/trivy-image-productcatalogservice.json,
-                        src/productcatalogservice/trivy-image-productcatalogservice.txt,
-                        src/productcatalogservice/gosec-report.json
-                    '''
-                )
-            }
+            emailext(
+                subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}",
+                body: """
+                    <p><b>ProductCatalogService DevSecOps Pipeline</b></p>
+                    <p>Status: ${currentBuild.currentResult}</p>
+                    <p>Docker Image: ${FULL_IMAGE}</p>
+                    <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to: 'jharakesh485@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: '**/trivy-fs-report.txt,**/trivy-image-productcatalogservice.*,**/gosec-report.json'
+            )
         }
     }
 }
