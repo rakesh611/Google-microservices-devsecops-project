@@ -6,21 +6,29 @@ pipeline {
     }
 
     environment {
+        // Sonar
         SCANNER_HOME = tool 'sonar'
-        IMAGE_NAME   = 'emailservice'
-        DOCKER_USER  = 'rakesh6nm'
-        DOCKER_REPO  = 'rakesh6nm/emailservice'
-        PATH = "${env.PATH}:/home/jenkins/.local/bin"
+
+        // Docker
+        DOCKER_USER = 'rakesh6nm'
+        IMAGE_NAME  = 'emailservice'
+        DOCKER_REPO = 'rakesh6nm/emailservice'
+        IMAGE_TAG   = "${BUILD_NUMBER}"
+
+        // Python user binaries (bandit, safety)
+        PATH = "/home/jenkins/.local/bin:${env.PATH}"
     }
 
     stages {
 
+        // ---------------- Clean ----------------
         stage("Clean Workspace") {
             steps {
                 cleanWs()
             }
         }
 
+        // ---------------- Git ----------------
         stage("Git Checkout") {
             steps {
                 git branch: 'main',
@@ -33,8 +41,8 @@ pipeline {
             steps {
                 dir('src/emailservice') {
                     sh '''
-                      python3 -m pip install --user bandit
-                      python3 -m bandit -r . -f json -o bandit-report.json || true
+                      python3 -m pip install --user --upgrade bandit
+                      bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
@@ -65,8 +73,8 @@ pipeline {
         // ---------------- Quality Gate (NON-BLOCKING) ----------------
         stage("Quality Gate") {
             steps {
-                script {
-                    timeout(time: 10, unit: 'MINUTES') {
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
                         def qg = waitForQualityGate abortPipeline: false
                         if (qg.status != 'OK') {
                             echo "⚠️ Quality Gate status: ${qg.status}"
@@ -77,13 +85,13 @@ pipeline {
             }
         }
 
-        // ---------------- Dependency Scan ----------------
+        // ---------------- Dependency Scan (Safety) ----------------
         stage("Safety Dependency Scan") {
             steps {
                 dir('src/emailservice') {
                     sh '''
-                      python3 -m pip install --user safety
-                      safety check --full-report --output json > safety-report.json || true
+                      python3 -m pip install --user --upgrade safety
+                      safety check --full-report --json > safety-report.json || true
                     '''
                 }
             }
@@ -118,23 +126,20 @@ pipeline {
         stage("Build Docker Image") {
             steps {
                 dir('src/emailservice') {
-                    script {
-                        env.IMAGE_TAG = "${DOCKER_REPO}:${BUILD_NUMBER}"
-                        sh '''
-                          docker build -t ${IMAGE_TAG} .
-                          docker tag ${IMAGE_TAG} ${DOCKER_REPO}:latest
-                        '''
-                    }
+                    sh '''
+                      docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
+                      docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
+                    '''
                 }
             }
         }
 
-        // ---------------- Push Image (FIXED) ----------------
+        // ---------------- Docker Push ----------------
         stage("Push to DockerHub") {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                        docker.image("${IMAGE_TAG}").push()
+                        docker.image("${DOCKER_REPO}:${IMAGE_TAG}").push()
                         docker.image("${DOCKER_REPO}:latest").push()
                     }
                 }
@@ -145,11 +150,15 @@ pipeline {
         stage("Trivy Image Scan") {
             steps {
                 sh '''
-                  trivy image --format json \
-                    -o trivy-image-email.json ${IMAGE_TAG} || true
+                  trivy image ${DOCKER_REPO}:${IMAGE_TAG} \
+                    --severity HIGH,CRITICAL \
+                    --format json \
+                    -o trivy-image-email.json || true
 
-                  trivy image --format table \
-                    -o trivy-image-email.txt ${IMAGE_TAG} || true
+                  trivy image ${DOCKER_REPO}:${IMAGE_TAG} \
+                    --severity HIGH,CRITICAL \
+                    --format table \
+                    -o trivy-image-email.txt || true
                 '''
             }
             post {
@@ -163,16 +172,16 @@ pipeline {
     // ---------------- Email Notification ----------------
     post {
         always {
-            emailext (
+            emailext(
                 subject: "Pipeline ${currentBuild.currentResult}: ${JOB_NAME} #${BUILD_NUMBER}",
+                mimeType: 'text/html',
+                to: 'jharakesh485@gmail.com',
                 body: """
                   <h3>Emailservice DevSecOps Pipeline</h3>
                   <p><b>Status:</b> ${currentBuild.currentResult}</p>
                   <p><b>Build:</b> ${BUILD_NUMBER}</p>
                   <p><b>URL:</b> <a href="${BUILD_URL}">${BUILD_URL}</a></p>
-                """,
-                to: 'jharakesh485@gmail.com',
-                mimeType: 'text/html'
+                """
             )
         }
     }
