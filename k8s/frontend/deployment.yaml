@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: rakesh6nm/frontend:latest  # Jenkins updates this automatically
+          image: rakesh6nm/frontend:4
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
