@@ -81,8 +81,8 @@ pipeline {
                             --scan .
                             --out dependency-check-report
                             --format HTML
-                            --nvdDisabled
-                            --disableAssembly
+                            --noupdate
+                            --failOnCVSS 11
                             --exclude **/bin/**
                             --exclude **/obj/**
                             --exclude **/.sonarqube/**
