@@ -5,38 +5,42 @@ pipeline {
         jdk 'jdk17'
         nodejs 'node20'
     }
-    
+
     environment {
         SCANNER_HOME = tool 'sonar'
-        DOCKER_USER   = 'rakesh6nm'
-        IMAGE_NAME    = 'paymentservice'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        FULL_IMAGE    = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-        PATH          = "${env.PATH}:/home/jenkins/.local/bin"
+        DOCKER_USER  = 'rakesh6nm'
+        IMAGE_NAME   = 'paymentservice'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+        PATH         = "${env.PATH}:/home/jenkins/.local/bin"
     }
 
     stages {
+
+        // ---------- Clean ----------
         stage("Clean Workspace") {
             steps { cleanWs() }
         }
 
+        // ---------- Git ----------
         stage("Git Checkout") {
             steps {
                 git branch: 'main', url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
             }
         }
 
+        // ---------- SonarQube ----------
         stage("SonarQube Analysis") {
             steps {
                 dir('src/paymentservice') {
                     withSonarQubeEnv('sonar-jenkins') {
-                        sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                          -Dsonar.projectKey=paymentservice \
-                          -Dsonar.projectName=paymentservice \
-                          -Dsonar.sources=. \
-                          -Dsonar.language=js
-                        '''
+                        sh """
+                          $SCANNER_HOME/bin/sonar-scanner \
+                            -Dsonar.projectKey=paymentservice \
+                            -Dsonar.projectName=paymentservice \
+                            -Dsonar.sources=. \
+                            -Dsonar.language=js
+                        """
                     }
                 }
             }
@@ -52,6 +56,7 @@ pipeline {
             }
         }
 
+        // ---------- Install Dependencies (Builder Stage) ----------
         stage("Install Dependencies") {
             steps {
                 dir('src/paymentservice') {
@@ -60,14 +65,17 @@ pipeline {
             }
         }
 
-        // ---------- Trivy File Scan ----------
-        stage("Trivy FS Scan") {
+        // ---------- Trivy FS Scan ----------
+        stage("Trivy File Scan") {
             steps {
                 dir('src/paymentservice') {
-                    sh '''
-                    trivy fs . --severity HIGH,CRITICAL --scanners vuln,misconfig,secret \
-                      --format table -o trivy-fs-report.txt || true
-                    '''
+                    sh """
+                      trivy fs . \
+                        --severity HIGH,CRITICAL \
+                        --scanners vuln,misconfig,secret \
+                        --format table \
+                        --output trivy-fs-report.txt || true
+                    """
                 }
             }
             post {
@@ -77,14 +85,14 @@ pipeline {
             }
         }
 
-        // ---------- Docker Build ----------
+        // ---------- Build Docker Image (Secure Multi-Stage) ----------
         stage("Build Docker Image") {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    echo "Building Docker image: ${FULL_IMAGE}"
-                    docker rmi -f ${FULL_IMAGE} || true
-                    docker build -t ${FULL_IMAGE} .
+                      echo "Building Docker image: ${FULL_IMAGE}"
+                      docker rmi -f ${FULL_IMAGE} || true
+                      docker build -t ${FULL_IMAGE} .
                     """
                 }
             }
@@ -109,8 +117,8 @@ pipeline {
             steps {
                 dir('src/paymentservice') {
                     sh """
-                    trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE} || true
-                    trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE} || true
+                      trivy image -f json -o trivy-image-payment.json ${FULL_IMAGE} || true
+                      trivy image -f table -o trivy-image-payment.txt ${FULL_IMAGE} || true
                     """
                 }
             }
@@ -131,14 +139,15 @@ pipeline {
                 emailext (
                     subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                     body: """
-                        <p>Paymentservice DevSecOps pipeline status.</p>
-                        <p>Project: ${env.JOB_NAME}</p>
-                        <p>Build Number: ${env.BUILD_NUMBER}</p>
-                        <p>Build Status: ${buildStatus}</p>
-                        <p>Started by: ${buildUser}</p>
-                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                        <p>PaymentService DevSecOps pipeline status.</p>
+                        <p><b>Project:</b> ${env.JOB_NAME}</p>
+                        <p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
+                        <p><b>Build Status:</b> ${buildStatus}</p>
+                        <p><b>Started by:</b> ${buildUser}</p>
+                        <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                     """,
                     to: 'jharakesh485@gmail.com',
+                    from: 'jharakesh485@gmail.com',
                     mimeType: 'text/html',
                     attachmentsPattern: 'trivy-fs-report.txt,trivy-image-payment.json,trivy-image-payment.txt'
                 )
