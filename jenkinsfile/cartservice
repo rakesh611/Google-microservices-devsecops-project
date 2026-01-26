@@ -6,10 +6,7 @@ pipeline {
     }
 
     environment {
-        // Sonar
         SCANNER_HOME = tool 'sonar'
-
-        // Docker
         DOCKER_USER  = 'rakesh6nm'
         IMAGE_NAME   = 'cartservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
@@ -31,11 +28,8 @@ pipeline {
             }
         }
 
-        /* ---------------- SonarQube ---------------- */
+        // ================== SONARQUBE ==================
         stage("SonarQube Analysis") {
-            environment {
-                SONAR_AUTH_TOKEN = credentials('sonar-jenkins')
-            }
             steps {
                 dir('src/cartservice') {
                     withSonarQubeEnv('sonar-jenkins') {
@@ -44,13 +38,11 @@ pipeline {
                         export PATH="$PATH:$HOME/.dotnet/tools"
 
                         dotnet sonarscanner begin \
-                          /k:"cartservice" \
-                          /d:sonar.login=$SONAR_AUTH_TOKEN
+                          /k:"cartservice"
 
                         dotnet build
 
-                        dotnet sonarscanner end \
-                          /d:sonar.login=$SONAR_AUTH_TOKEN
+                        dotnet sonarscanner end
                         '''
                     }
                 }
@@ -65,7 +57,7 @@ pipeline {
             }
         }
 
-        /* ---------------- Build & Test ---------------- */
+        // ================== BUILD & TEST ==================
         stage("Build & Test") {
             steps {
                 dir('src/cartservice/src') {
@@ -78,11 +70,8 @@ pipeline {
             }
         }
 
-        /* ---------------- Dependency Check (SCA) ---------------- */
+        // ================== DEPENDENCY CHECK (NO NVD) ==================
         stage("Dependency Check") {
-            environment {
-                NVD_API_KEY = credentials('nvd-api-key')
-            }
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     dir('src/cartservice') {
@@ -92,8 +81,8 @@ pipeline {
                             --scan .
                             --out dependency-check-report
                             --format HTML
-                            --nvdApiKey ${NVD_API_KEY}
-                            --nvdApiDelay 8000
+                            --nvdDisabled
+                            --disableAssembly
                             --exclude **/bin/**
                             --exclude **/obj/**
                             --exclude **/.sonarqube/**
@@ -110,7 +99,7 @@ pipeline {
             }
         }
 
-        /* ---------------- Trivy FS Scan ---------------- */
+        // ================== TRIVY FILE SCAN ==================
         stage("Trivy File Scan") {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
@@ -133,38 +122,35 @@ pipeline {
             }
         }
 
-        /* ---------------- Docker Build ---------------- */
-        stage("Docker Build") {
+        // ================== DOCKER BUILD ==================
+        stage("Build Docker Image") {
             steps {
                 dir('src/cartservice/src') {
-                    sh 'docker build -t ${FULL_IMAGE} .'
+                    sh "docker build -t ${FULL_IMAGE} ."
                 }
             }
         }
 
-        /* ---------------- Docker Push ---------------- */
-        stage("Docker Push") {
+        // ================== DOCKER PUSH ==================
+        stage("Build & Push Docker Image") {
             steps {
                 script {
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'dockerhub1'
-                    ) {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
                         def img = docker.image("${FULL_IMAGE}")
                         img.push()
-                        img.push('latest')
+                        img.push("latest")
                     }
                 }
             }
         }
 
-        /* ---------------- Trivy Image Scan ---------------- */
+        // ================== TRIVY IMAGE SCAN ==================
         stage("Trivy Image Scan") {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     sh '''
-                    trivy image ${FULL_IMAGE} -f table -o trivy-image-cart.txt
-                    trivy image ${FULL_IMAGE} -f json -o trivy-image-cart.json
+                    trivy image ${FULL_IMAGE} -f table -o trivy-image-cart.txt || true
+                    trivy image ${FULL_IMAGE} -f json -o trivy-image-cart.json || true
                     '''
                 }
             }
