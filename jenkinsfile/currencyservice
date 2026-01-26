@@ -18,7 +18,9 @@ pipeline {
 
         // ---------- Clean ----------
         stage('Clean Workspace') {
-            steps { cleanWs() }
+            steps {
+                cleanWs()
+            }
         }
 
         // ---------- Git ----------
@@ -60,28 +62,26 @@ pipeline {
             }
         }
 
-        // ---------- OWASP Dependency Check ----------
-        stage('OWASP FS Scan') {
+        // ---------- Trivy FS Scan ----------
+        stage('Trivy File System Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     dir('src/currencyservice') {
-                        dependencyCheck(
-                            odcInstallation: 'dp-check',
-                            additionalArguments: '''
-                              --scan .
-                              --suppression ../../dependency-check/suppression.xml
-                              --format XML
-                              --out dependency-check-report
-                              --disableNodeAudit
-                              --disableYarnAudit
-                            '''
-                        )
+                        sh '''
+                        echo "Running Trivy FS scan..."
+                        trivy fs . \
+                          --severity HIGH,CRITICAL \
+                          --scanners vuln,misconfig,secret \
+                          --exit-code 0 \
+                          -o trivy-fs-currency.txt
+                        '''
                     }
                 }
             }
             post {
                 always {
-                    archiveArtifacts 'src/currencyservice/dependency-check-report/**'
+                    archiveArtifacts artifacts: 'src/currencyservice/trivy-fs-currency.txt',
+                                     allowEmptyArchive: true
                 }
             }
         }
@@ -102,9 +102,13 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                        docker.image("${FULL_IMAGE}").push()
-                        docker.image("${FULL_IMAGE}").push("latest")
+                    docker.withRegistry(
+                        'https://index.docker.io/v1/',
+                        'dockerhub1'
+                    ) {
+                        def img = docker.image("${FULL_IMAGE}")
+                        img.push()
+                        img.push("latest")
                     }
                 }
             }
@@ -113,34 +117,30 @@ pipeline {
         // ---------- Trivy Image Scan ----------
         stage('Trivy Image Scan') {
             steps {
-                script {
-                    def trivyStatus = sh(
-                        script: '''
-                          trivy image ${FULL_IMAGE} \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --scanners vuln \
-                            --format json \
-                            -o trivy-image-currency.json || true
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh '''
+                    echo "Running Trivy Image scan..."
+                    trivy image ${FULL_IMAGE} \
+                      --severity HIGH,CRITICAL \
+                      --ignore-unfixed \
+                      --scanners vuln \
+                      -f table \
+                      -o trivy-image-currency.txt || true
 
-                          trivy image ${FULL_IMAGE} \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --scanners vuln \
-                            --format table \
-                            -o trivy-image-currency.txt
-                        ''',
-                        returnStatus: true
-                    )
-
-                    if (trivyStatus != 0) {
-                        unstable("HIGH or CRITICAL vulnerabilities found by Trivy")
-                    }
+                    trivy image ${FULL_IMAGE} \
+                      --severity HIGH,CRITICAL \
+                      --ignore-unfixed \
+                      --scanners vuln \
+                      -f json \
+                      -o trivy-image-currency.json || true
+                    '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'trivy-image-currency.*', fingerprint: true
+                    archiveArtifacts artifacts: 'trivy-image-currency.*',
+                                     fingerprint: true,
+                                     allowEmptyArchive: true
                 }
             }
         }
