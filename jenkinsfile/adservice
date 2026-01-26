@@ -29,11 +29,11 @@ pipeline {
             steps {
                 dir('src/adservice') {
                     sh '''
-                    trivy fs . \
-                      --severity CRITICAL,HIGH \
-                      --scanners vuln,misconfig,secret \
-                      --format table \
-                      --output trivy-fs-report.txt
+                      trivy fs . \
+                        --severity CRITICAL,HIGH \
+                        --scanners vuln,misconfig,secret \
+                        --format table \
+                        --output trivy-fs-report.txt
                     '''
                 }
             }
@@ -77,8 +77,10 @@ pipeline {
                     echo "Configuring SSH for GitOps access"
                     export GIT_SSH_COMMAND="ssh -i /var/lib/jenkins/.ssh/id_rsa -o StrictHostKeyChecking=no"
 
+                    rm -rf ${GITOPS_DIR}
+                    git clone ${GITOPS_REPO} ${GITOPS_DIR}
 
-                    cd /Google-microservices-devsecops-project/k8s/adservice
+                    cd ${GITOPS_DIR}/k8s/adservice
 
                     echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
                     sed -i "s|image: .*|image: ${IMAGE_FULL}:${IMAGE_TAG}|g" deployment.yaml
@@ -86,7 +88,7 @@ pipeline {
                     git config user.email "jharakesh485@gmail.com"
                     git config user.name "Rakesh Jha"
 
-                    git add deployment.yaml
+                    git add k8s/adservice/deployment.yaml
                     git commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
 
                     git push origin main
@@ -96,14 +98,6 @@ pipeline {
     }
 
     post {
-        success {
-            echo "✅ Deployment triggered via GitOps successfully"
-        }
-
-        failure {
-            echo "❌ Pipeline failed – check logs"
-        }
-
         always {
             script {
                 if (fileExists('src/adservice/trivy-fs-report.txt')) {
