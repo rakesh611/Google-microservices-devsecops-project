@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartservice
+  namespace: default
+  labels:
+    app: cartservice
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: cartservice
+  template:
+    metadata:
+      labels:
+        app: cartservice
+    spec:
+      containers:
+        - name: cartservice
+          image: rakesh6nm/cartservice:latest   # Jenkins will update this tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
