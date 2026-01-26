@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkoutservice
+  namespace: default
+  labels:
+    app: checkoutservice
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: checkoutservice
+  template:
+    metadata:
+      labels:
+        app: checkoutservice
+    spec:
+      containers:
+        - name: checkoutservice
+          image: rakesh6nm/checkoutservice:latest  # Jenkins GitOps updates this tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
