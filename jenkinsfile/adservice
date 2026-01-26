@@ -77,10 +77,8 @@ pipeline {
                     echo "Configuring SSH for GitOps access"
                     export GIT_SSH_COMMAND="ssh -i /var/lib/jenkins/.ssh/id_rsa -o StrictHostKeyChecking=no"
 
-                    rm -rf ${GITOPS_DIR}
-                    git clone ${GITOPS_REPO} ${GITOPS_DIR}
 
-                    cd ${GITOPS_DIR}/Google-microservices-devsecops-project/k8s/adservice
+                    cd /Google-microservices-devsecops-project/k8s/adservice
 
                     echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
                     sed -i "s|image: .*|image: ${IMAGE_FULL}:${IMAGE_TAG}|g" deployment.yaml
