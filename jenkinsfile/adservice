@@ -6,9 +6,15 @@ pipeline {
     }
 
     environment {
+        // Docker
         DOCKER_REPO = 'rakesh6nm'
         IMAGE_NAME  = 'adservice'
         IMAGE_FULL  = "${DOCKER_REPO}/${IMAGE_NAME}"
+        IMAGE_TAG   = "${BUILD_NUMBER}"
+
+        // GitOps
+        GITOPS_REPO = 'git@github.com:rakesh611/complete-prodcution-pipeline.git'
+        GITOPS_DIR  = 'gitops'
     }
 
     stages {
@@ -42,7 +48,6 @@ pipeline {
             steps {
                 dir('src/adservice') {
                     script {
-                        env.IMAGE_TAG = "${BUILD_NUMBER}"
                         dockerImage = docker.build("${IMAGE_FULL}:${IMAGE_TAG}")
                         dockerImage.tag("latest")
                     }
@@ -63,9 +68,49 @@ pipeline {
                 }
             }
         }
+
+        stage('Update GitOps Repo') {
+            steps {
+                sh """
+                    set -e
+
+                    echo "Configuring SSH for GitOps access"
+                    export GIT_SSH_COMMAND="ssh -i /var/lib/jenkins/.ssh/id_rsa -o StrictHostKeyChecking=no"
+
+                    rm -rf ${GITOPS_DIR}
+                    git clone ${GITOPS_REPO} ${GITOPS_DIR}
+
+                    cd ${GITOPS_DIR}/apps
+
+                    echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
+                    sed -i "s|image: .*|image: ${IMAGE_FULL}:${IMAGE_TAG}|g" deployment.yaml
+
+                    echo "Ensuring Service is NodePort on 30080"
+                    sed -i 's|type: ClusterIP|type: NodePort|g' service.yaml
+                    sed -i '/nodePort:/d' service.yaml
+                    sed -i '/ports:/a\\    nodePort: 30080' service.yaml
+
+                    git config user.email "jharakesh485@gmail.com"
+                    git config user.name "Rakesh Jha"
+
+                    git add deployment.yaml service.yaml
+                    git commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
+
+                    git push origin main
+                """
+            }
+        }
     }
 
     post {
+        success {
+            echo "✅ Deployment triggered via GitOps successfully"
+        }
+
+        failure {
+            echo "❌ Pipeline failed – check logs"
+        }
+
         always {
             script {
                 if (fileExists('src/adservice/trivy-fs-report.txt')) {
