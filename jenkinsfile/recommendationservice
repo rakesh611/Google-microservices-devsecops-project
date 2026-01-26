@@ -40,7 +40,8 @@ pipeline {
                 dir('src/recommendationservice') {
                     sh '''
                         python3 -m pip install --user --upgrade bandit
-                        bandit -r . -f json -o bandit-report.json || true
+                        echo "Running Bandit via python module..."
+                        python3 -m bandit -r . -f json -o bandit-report.json || true
                     '''
                 }
             }
