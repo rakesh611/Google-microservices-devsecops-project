@@ -1,3 +1,6 @@
+// Declare dockerImage globally for reuse
+def dockerImage
+
 pipeline {
     agent any
 
@@ -14,22 +17,22 @@ pipeline {
         IMAGE_NAME   = 'cartservice'
         IMAGE_TAG    = "${BUILD_NUMBER}"
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+        // GitOps
+        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
 
         // ================= CLEAN =================
         stage("Clean Workspace") {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
         // ================= CHECKOUT =================
         stage("Git Checkout") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/rakesh611/Google-microservices-devsecops-project.git'
+                git branch: 'main', url: "${GITOPS_REPO}"
             }
         }
 
@@ -42,11 +45,8 @@ pipeline {
                         dotnet tool install --global dotnet-sonarscanner || true
                         export PATH="$PATH:$HOME/.dotnet/tools"
 
-                        dotnet sonarscanner begin \
-                          /k:"cartservice"
-
+                        dotnet sonarscanner begin /k:"cartservice"
                         dotnet build
-
                         dotnet sonarscanner end
                         '''
                     }
@@ -93,8 +93,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts allowEmptyArchive: true,
-                        artifacts: 'src/cartservice/trivy-fs-cartservice.txt'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'src/cartservice/trivy-fs-cartservice.txt'
                 }
             }
         }
@@ -103,7 +102,10 @@ pipeline {
         stage("Build Docker Image") {
             steps {
                 dir('src/cartservice/src') {
-                    sh "docker build -t ${FULL_IMAGE} ."
+                    script {
+                        dockerImage = docker.build("${FULL_IMAGE}")
+                        dockerImage.tag("latest")
+                    }
                 }
             }
         }
@@ -112,13 +114,9 @@ pipeline {
         stage("Push Docker Image") {
             steps {
                 script {
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'dockerhub1'
-                    ) {
-                        def img = docker.image("${FULL_IMAGE}")
-                        img.push()
-                        img.push('latest')
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        dockerImage.push("${IMAGE_TAG}")
+                        dockerImage.push("latest")
                     }
                 }
             }
@@ -137,11 +135,33 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts allowEmptyArchive: true,
-                        artifacts: 'trivy-image-cart.txt,trivy-image-cart.json'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'trivy-image-cart.txt,trivy-image-cart.json'
                 }
             }
         }
+
+        // ================= GITOPS UPDATE =================
+        stage("Update GitOps Deployment") {
+            steps {
+                sshagent(['gitops_ssh']) {
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+
+                        echo "Updating cartservice deployment image to ${FULL_IMAGE}"
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/cartservice/deployment.yaml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/cartservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy cartservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
+                }
+            }
+        }
+
     }
 
     // ================= FINAL NOTIFICATION =================
@@ -149,9 +169,7 @@ pipeline {
         always {
             script {
                 def buildStatus = currentBuild.currentResult
-                def buildUser = currentBuild.getBuildCauses(
-                    'hudson.model.Cause$UserIdCause'
-                )[0]?.userId ?: 'GitHub User'
+                def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'GitHub User'
 
                 emailext(
                     subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
