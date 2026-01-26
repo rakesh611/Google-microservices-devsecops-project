@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: emailservice
-          image: rakesh6nm/emailservice:latest  # Jenkins GitOps updates this automatically
+          image: rakesh6nm/emailservice:17
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
