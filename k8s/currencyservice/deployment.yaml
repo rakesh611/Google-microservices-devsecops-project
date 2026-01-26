@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: currencyservice
-          image: rakesh6nm/currencyservice:latest  # Jenkins GitOps updates this tag automatically
+          image: rakesh6nm/currencyservice:23
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
