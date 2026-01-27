@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cartservice
-  namespace: default
+  namespace: google-microservices          
   labels:
     app: cartservice
 spec:
@@ -20,5 +20,39 @@ spec:
         - name: cartservice
           image: rakesh6nm/cartservice:41
           imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 80
+              name: http
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          env:
+            - name: SERVICE_NAME
+              value: "cartservice"
+            - name: SERVICE_PORT
+              value: "80"
