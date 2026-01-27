@@ -1,9 +1,8 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: currencyservice
-  namespace: default
+  namespace: google-microservices
   labels:
     app: currencyservice
 spec:
@@ -21,12 +20,55 @@ spec:
         - name: currencyservice
           image: rakesh6nm/currencyservice:23
           imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 80
+              name: http
+
           resources:
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
             requests:
               cpu: "250m"
               memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          env:
+            - name: SERVICE_NAME
+              value: "currencyservice"
+            - name: SERVICE_PORT
+              value: "80"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: currencyservice
+  namespace: google-microservices
+  labels:
+    app: currencyservice
+spec:
+  type: ClusterIP
+  selector:
+    app: currencyservice
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
