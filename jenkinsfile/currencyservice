@@ -42,8 +42,8 @@ pipeline {
                 dir('src/currencyservice') {
                     withSonarQubeEnv('sonar-jenkins') {
                         sh """
-                          ${SCANNER_HOME}/bin/sonar-scanner \
-                            -Dsonar.projectBaseDir=.
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                          -Dsonar.projectBaseDir=.
                         """
                     }
                 }
@@ -52,7 +52,7 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                timeout(time: 3, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -117,7 +117,7 @@ pipeline {
         stage('Trivy Image Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    sh '''
+                    sh """
                     trivy image ${FULL_IMAGE} \
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
@@ -127,7 +127,7 @@ pipeline {
                       --severity HIGH,CRITICAL \
                       --ignore-unfixed \
                       -f json -o trivy-image-currency.json || true
-                    '''
+                    """
                 }
             }
             post {
@@ -142,12 +142,21 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
+                        # Clean and clone GitOps repo
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        echo "Updating currencyservice deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/currencyservice.yml
+                        # Download yq if missing
+                        if [ ! -f yq ]; then
+                            wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                            chmod +x yq
+                        fi
 
+                        echo "Updating currencyservice deployment image to ${FULL_IMAGE}"
+                        ./yq e -i ".spec.template.spec.containers[0].image = \\"${FULL_IMAGE}\\"" Google-microservices-devsecops-project/k8s/currencyservice.yml
+                        cat Google-microservices-devsecops-project/k8s/currencyservice.yml
+
+                        # Git config & commit
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
