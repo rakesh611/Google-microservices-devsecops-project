@@ -15,7 +15,7 @@ spec:
       terminationGracePeriodSeconds: 5
       containers:
       - name: server
-        image: harishnshetty/paymentservice:latest
+        image: 
         ports:
         - containerPort: 50051
         env:
