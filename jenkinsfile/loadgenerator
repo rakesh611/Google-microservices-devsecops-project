@@ -157,19 +157,19 @@ pipeline {
                         // Clone repo
                         sh "rm -rf ${gitopsDir} && git clone ${GITOPS_REPO} ${gitopsDir}"
 
-                        // Install yq if not present
+                        // Download yq locally if not present
                         sh """
-                            if ! command -v yq &> /dev/null; then
-                                echo "Installing yq..."
-                                sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-                                sudo chmod +x /usr/local/bin/yq
+                            if [ ! -f yq ]; then
+                                echo "Downloading yq locally..."
+                                wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                                chmod +x yq
                             fi
                         """
 
-                        // Update image safely
+                        // Update image safely using local yq
                         sh """
                             echo "Updating loadgenerator image to ${FULL_IMAGE}"
-                            yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' ${yamlFile}
+                            ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' ${yamlFile}
                             echo "Updated YAML:"
                             cat ${yamlFile}
                         """
