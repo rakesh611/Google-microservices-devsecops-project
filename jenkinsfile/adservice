@@ -1,3 +1,4 @@
+
 // Declare dockerImage globally so it's available across stages
 def dockerImage
 
@@ -17,7 +18,6 @@ pipeline {
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
-        gitopsDir   = "Google-microservices-devsecops-project"
     }
 
     stages {
@@ -40,7 +40,7 @@ pipeline {
                         --severity CRITICAL,HIGH \
                         --scanners vuln,misconfig,secret \
                         --format table \
-                        --output trivy-fs-report.txt || true
+                        --output trivy-fs-report.txt
                     '''
                 }
             }
@@ -76,50 +76,45 @@ pipeline {
         stage('Update GitOps Repo') {
             steps {
                 sshagent(['gitops_ssh']) {
-                    script {
-                        // Clone repo
-                        sh "rm -rf ${gitopsDir} && git clone ${GITOPS_REPO} ${gitopsDir}"
+                    sh """
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        // Update Docker image in YAML
-                        sh """
-                            echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
-                            sed -i "s|image: ${DOCKER_REPO}/${IMAGE_NAME}:.*|image: ${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}|" ${gitopsDir}/k8s/adservice.yml
-                            cat ${gitopsDir}/k8s/adservice.yml
-                        """
+                        echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
+                        sed -i "s|image: ${DOCKER_REPO}/${IMAGE_NAME}:.*|image: ${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}|" Google-microservices-devsecops-project/k8s/adservice.yml
 
-                        // Git commit and push
-                        sh """
-                            git -C ${gitopsDir} config user.email "jharakesh485@gmail.com"
-                            git -C ${gitopsDir} config user.name "Rakesh Jha"
-                            git -C ${gitopsDir} add k8s/adservice.yml
-                            git -C ${gitopsDir} commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" || echo "No changes to commit"
-                            git -C ${gitopsDir} push origin main || echo "Push failed, check permissions"
-                        """
-                    }
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/adservice.yml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
+
+                        git -C Google-microservices-devsecops-project push origin main
+                    """
                 }
             }
         }
+
     }
 
     post {
         always {
             script {
-                def trivyReport = 'src/adservice/trivy-fs-report.txt'
-                def attachments = fileExists(trivyReport) ? trivyReport : ''
-                emailext(
-                    subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    mimeType: 'text/html',
-                    to: 'jharakesh485@gmail.com',
-                    body: """
+                if (fileExists('src/adservice/trivy-fs-report.txt')) {
+                    emailext(
+                        subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        mimeType: 'text/html',
+                        to: 'jharakesh485@gmail.com',
+                        body: """
                         <h3>Adservice DevSecOps Pipeline</h3>
                         <p><b>Status:</b> ${currentBuild.currentResult}</p>
                         <p><b>Job:</b> ${env.JOB_NAME}</p>
                         <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
-                        <p><b>Docker Image:</b> ${IMAGE_FULL}:${IMAGE_TAG}</p>
                         <p><b>URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                    """,
-                    attachmentsPattern: attachments
-                )
+                        """,
+                        attachmentsPattern: 'src/adservice/trivy-fs-report.txt'
+                    )
+                }
             }
         }
 
