@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: adservice
-          image: rakesh6nm/adservice:22
+          image: rakesh6nm/adservice:23
           imagePullPolicy: IfNotPresent
 
           ports:
