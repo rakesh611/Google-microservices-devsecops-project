@@ -2,12 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: frontend
 spec:
-  replicas: 1
-  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app: frontend
@@ -15,61 +10,91 @@ spec:
     metadata:
       labels:
         app: frontend
+      annotations:
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"
     spec:
+      serviceAccountName: default
       containers:
-        - name: frontend
-          image: rakesh6nm/frontend:4
-          imagePullPolicy: IfNotPresent
-
+        - name: server
+          image: harishnshetty/frontend:latest
           ports:
-            - containerPort: 80
-              name: http
-
+          - containerPort: 8080
+          readinessProbe:
+            initialDelaySeconds: 10
+            httpGet:
+              path: "/_healthz"
+              port: 8080
+              httpHeaders:
+              - name: "Cookie"
+                value: "shop_session-id=x-readiness-probe"
+          livenessProbe:
+            initialDelaySeconds: 10
+            httpGet:
+              path: "/_healthz"
+              port: 8080
+              httpHeaders:
+              - name: "Cookie"
+                value: "shop_session-id=x-liveness-probe"
+          env:
+          - name: PORT
+            value: "8080"
+          - name: PRODUCT_CATALOG_SERVICE_ADDR
+            value: "productcatalogservice:3550"
+          - name: CURRENCY_SERVICE_ADDR
+            value: "currencyservice:7000"
+          - name: CART_SERVICE_ADDR
+            value: "cartservice:7070"
+          - name: RECOMMENDATION_SERVICE_ADDR
+            value: "recommendationservice:8080"
+          - name: SHIPPING_SERVICE_ADDR
+            value: "shippingservice:50051"
+          - name: CHECKOUT_SERVICE_ADDR
+            value: "checkoutservice:5050"
+          - name: AD_SERVICE_ADDR
+            value: "adservice:9555"
+          - name: SHOPPING_ASSISTANT_SERVICE_ADDR
+            value: "shoppingassistantservice:80"  
+          # # ENV_PLATFORM: One of: local, gcp, aws, azure, onprem, alibaba
+          # # When not set, defaults to "local" unless running in GKE, otherwies auto-sets to gcp
+          # - name: ENV_PLATFORM
+          #   value: "aws"
+          - name: ENABLE_PROFILER
+            value: "0"
+          # - name: CYMBAL_BRANDING
+          #   value: "true"
+          # - name: FRONTEND_MESSAGE
+          #   value: "Replace this with a message you want to display on all pages."
           resources:
             requests:
-              cpu: "250m"
-              memory: "256Mi"
+              cpu: 100m
+              memory: 64Mi
             limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          env:
-            - name: SERVICE_NAME
-              value: "frontend"
-            - name: SERVICE_PORT
-              value: "80"
+              cpu: 200m
+              memory: 128Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: frontend
 spec:
   type: NodePort
   selector:
     app: frontend
   ports:
-    - name: http
-      port: 80
-      targetPort: 80
-      nodePort: 30095
+  - name: http
+    port: 80
+    targetPort: 8080
+    nodePort: 30101
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-external
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
