@@ -31,9 +31,7 @@ pipeline {
 
         // ================= GIT =================
         stage("Git Checkout") {
-            steps {
-                git branch: 'main', url: "${GITOPS_REPO}"
-            }
+            steps { git branch: 'main', url: "${GITOPS_REPO}" }
         }
 
         // ================= SAST: BANDIT =================
@@ -150,16 +148,25 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
+                        # Clone GitOps repo
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/recommendationservice.yml
+                        # Download yq if missing
+                        if [ ! -f yq ]; then
+                            wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                            chmod +x yq
+                        fi
 
+                        # Update image in YAML using yq
+                        ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' Google-microservices-devsecops-project/k8s/recommendationservice.yml
+                        cat Google-microservices-devsecops-project/k8s/recommendationservice.yml
+
+                        # Commit & push changes
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
-
                         git -C Google-microservices-devsecops-project add k8s/recommendationservice.yml
-                        git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project commit -m "Deploy recommendationservice ${IMAGE_TAG}" --allow-empty
                         git -C Google-microservices-devsecops-project push origin main
                     """
                 }
