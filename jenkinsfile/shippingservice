@@ -16,7 +16,7 @@ pipeline {
         FULL_IMAGE   = "${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
 
         // GitOps repo
-        GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
+        GITOPS_REPO  = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
     }
 
     stages {
@@ -28,7 +28,9 @@ pipeline {
 
         // ================= GIT =================
         stage("Git Checkout") {
-            steps { git branch: 'main', url: "${GITOPS_REPO}" }
+            steps {
+                git branch: 'main', url: "${GITOPS_REPO}"
+            }
         }
 
         // ================= SAST: GOSEC =================
@@ -37,14 +39,20 @@ pipeline {
                 dir('src/shippingservice') {
                     sh '''
                         export PATH="$PATH:$(go env GOPATH)/bin"
+
                         if ! command -v gosec >/dev/null 2>&1; then
                             go install github.com/securego/gosec/v2/cmd/gosec@latest
                         fi
+
                         gosec -fmt=sonarqube -out gosec-report.json -no-fail ./...
                     '''
                 }
             }
-            post { always { archiveArtifacts 'src/shippingservice/gosec-report.json' } }
+            post {
+                always {
+                    archiveArtifacts 'src/shippingservice/gosec-report.json'
+                }
+            }
         }
 
         // ================= SONARQUBE =================
@@ -57,6 +65,7 @@ pipeline {
                               -Dsonar.projectKey=shippingservice \
                               -Dsonar.projectName=shippingservice \
                               -Dsonar.sources=. \
+                              -Dsonar.language=go \
                               -Dsonar.go.gosec.reportPaths=gosec-report.json
                         '''
                     }
@@ -64,13 +73,29 @@ pipeline {
             }
         }
 
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         // ================= BUILD & TEST =================
         stage("Go Build") {
-            steps { dir('src/shippingservice') { sh 'CGO_ENABLED=0 go build -o app .' } }
+            steps {
+                dir('src/shippingservice') {
+                    sh 'CGO_ENABLED=0 go build -o app .'
+                }
+            }
         }
 
         stage("Go Unit Tests") {
-            steps { dir('src/shippingservice') { sh 'go test -v -coverprofile=coverage.out ./...' } }
+            steps {
+                dir('src/shippingservice') {
+                    sh 'go test -v -coverprofile=coverage.out ./...'
+                }
+            }
         }
 
         // ================= SCA: GOVULNCHECK =================
@@ -79,9 +104,11 @@ pipeline {
                 dir('src/shippingservice') {
                     sh '''
                         export PATH="$PATH:$(go env GOPATH)/bin"
+
                         if ! command -v govulncheck >/dev/null 2>&1; then
                             go install golang.org/x/vuln/cmd/govulncheck@latest
                         fi
+
                         govulncheck ./... || true
                     '''
                 }
@@ -96,26 +123,32 @@ pipeline {
                         trivy fs . \
                           --severity CRITICAL,HIGH \
                           --scanners vuln,misconfig,secret \
-                          > trivy-fs-report.txt || true
+                          -o trivy-fs-report.txt || true
                     '''
                 }
             }
-            post { always { archiveArtifacts 'src/shippingservice/trivy-fs-report.txt' } }
+            post {
+                always {
+                    archiveArtifacts 'src/shippingservice/trivy-fs-report.txt'
+                }
+            }
         }
 
         // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
-            steps { dir('src/shippingservice') { sh "docker build -t ${FULL_IMAGE} ." } }
+            steps {
+                dir('src/shippingservice') {
+                    sh "docker build -t ${FULL_IMAGE} ."
+                }
+            }
         }
 
         stage("Push Docker Image") {
             steps {
-                dir('src/shippingservice') {
-                    script {
-                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
-                        }
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        docker.image("${FULL_IMAGE}").push()
+                        docker.image("${FULL_IMAGE}").push('latest')
                     }
                 }
             }
@@ -124,33 +157,44 @@ pipeline {
         // ================= TRIVY IMAGE =================
         stage("Trivy Image Scan") {
             steps {
-                dir('src/shippingservice') {
-                    sh '''
-                        trivy image -f json -o trivy-image-shippingservice.json ${FULL_IMAGE} || true
-                        trivy image -f table -o trivy-image-shippingservice.txt ${FULL_IMAGE} || true
-                    '''
+                sh '''
+                    trivy image -f json  -o trivy-image-shippingservice.json ${FULL_IMAGE} || true
+                    trivy image -f table -o trivy-image-shippingservice.txt  ${FULL_IMAGE} || true
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts 'trivy-image-shippingservice.*'
                 }
             }
-            post { always { archiveArtifacts 'src/shippingservice/trivy-image-shippingservice.*' } }
         }
 
         // ================= GITOPS DEPLOYMENT =================
         stage("Update GitOps Deployment") {
             steps {
                 sshagent(['gitops_ssh']) {
-                    sh """
-                        rm -rf Google-microservices-devsecops-project
-                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+                    sh '''
+                        rm -rf gitops-repo
+                        git clone ${GITOPS_REPO} gitops-repo
 
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/shippingservice.yml
+                        # Install yq if missing
+                        if ! command -v yq >/dev/null 2>&1; then
+                            curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o yq
+                            chmod +x yq
+                            mv yq /usr/local/bin/yq || true
+                        fi
 
-                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
-                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+                        # Update image safely
+                        yq e -i '.spec.template.spec.containers[0].image = "'${FULL_IMAGE}'"' \
+                          gitops-repo/k8s/shippingservice.yml
 
-                        git -C Google-microservices-devsecops-project add k8s/shippingservice.yml
-                        git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
-                        git -C Google-microservices-devsecops-project push origin main
-                    """
+                        git -C gitops-repo config user.email "jharakesh485@gmail.com"
+                        git -C gitops-repo config user.name  "Rakesh Jha"
+
+                        git -C gitops-repo add k8s/shippingservice.yml
+                        git -C gitops-repo commit -m "Deploy shippingservice ${IMAGE_TAG}" --allow-empty
+                        git -C gitops-repo push origin main
+                    '''
                 }
             }
         }
@@ -172,8 +216,8 @@ pipeline {
                 attachmentsPattern: '''
                     src/shippingservice/gosec-report.json,
                     src/shippingservice/trivy-fs-report.txt,
-                    src/shippingservice/trivy-image-shippingservice.json,
-                    src/shippingservice/trivy-image-shippingservice.txt
+                    trivy-image-shippingservice.json,
+                    trivy-image-shippingservice.txt
                 '''
             )
         }
