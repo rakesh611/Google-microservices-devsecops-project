@@ -142,12 +142,12 @@ pipeline {
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/shippingservice/deployment.yaml
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/shippingservice.yml
 
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
-                        git -C Google-microservices-devsecops-project add k8s/shippingservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project add k8s/shippingservice.yml
                         git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
                         git -C Google-microservices-devsecops-project push origin main
                     """
