@@ -177,12 +177,12 @@ pipeline {
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
                         echo "Updating frontend deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/frontend/deployment.yaml
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/frontend.yml
 
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
-                        git -C Google-microservices-devsecops-project add k8s/frontend/deployment.yaml
+                        git -C Google-microservices-devsecops-project add k8s/frontend.yml
                         git -C Google-microservices-devsecops-project commit -m "Deploy frontend ${IMAGE_TAG}" --allow-empty
                         git -C Google-microservices-devsecops-project push origin main
                     """
