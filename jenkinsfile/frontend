@@ -19,8 +19,6 @@ pipeline {
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
-
-        GO_BIN_PATH = '$(go env GOPATH)/bin'
     }
 
     stages {
@@ -43,11 +41,9 @@ pipeline {
                 dir('src/frontend') {
                     sh '''
                     export PATH="$PATH:$(go env GOPATH)/bin"
-
                     if ! command -v gosec &> /dev/null; then
                         go install github.com/securego/gosec/v2/cmd/gosec@latest
                     fi
-
                     gosec -fmt=sonarqube -out gosec-report.json -no-fail ./...
                     '''
                 }
@@ -104,11 +100,9 @@ pipeline {
                 dir('src/frontend') {
                     sh '''
                     export PATH="$PATH:$(go env GOPATH)/bin"
-
                     if ! command -v govulncheck &> /dev/null; then
                         go install golang.org/x/vuln/cmd/govulncheck@latest
                     fi
-
                     govulncheck ./... || true
                     '''
                 }
@@ -173,15 +167,23 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
+                        # Clean clone
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        echo "Updating frontend deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/frontend.yml
+                        # Download yq if not present
+                        if [ ! -f yq ]; then
+                            wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                            chmod +x yq
+                        fi
 
+                        # Update the image in frontend.yml
+                        ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' Google-microservices-devsecops-project/k8s/frontend.yml
+                        cat Google-microservices-devsecops-project/k8s/frontend.yml
+
+                        # Git commit & push
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
-
                         git -C Google-microservices-devsecops-project add k8s/frontend.yml
                         git -C Google-microservices-devsecops-project commit -m "Deploy frontend ${IMAGE_TAG}" --allow-empty
                         git -C Google-microservices-devsecops-project push origin main
@@ -189,7 +191,8 @@ pipeline {
                 }
             }
         }
-    }
+
+    } // stages
 
     // ================= EMAIL NOTIFICATION =================
     post {
