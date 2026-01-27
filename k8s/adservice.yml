@@ -1,9 +1,8 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: adservice
-  namespace: default
+  namespace: google-microservices   
   labels:
     app: adservice
 spec:
