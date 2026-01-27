@@ -2,11 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: recommendationservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: recommendationservice
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: recommendationservice
@@ -15,60 +11,45 @@ spec:
       labels:
         app: recommendationservice
     spec:
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 5
       containers:
-        - name: recommendationservice
-          image: rakesh6nm/recommendationservice:3
-          imagePullPolicy: IfNotPresent
-
-          ports:
-            - containerPort: 5000
-              name: http
-
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          env:
-            - name: SERVICE_NAME
-              value: "recommendationservice"
-            - name: SERVICE_PORT
-              value: "5000"
+      - name: server
+        image: harishnshetty/recommendationservice:latest
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          periodSeconds: 5
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:8080"]
+        livenessProbe:
+          periodSeconds: 5
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:8080"]
+        env:
+        - name: PORT
+          value: "8080"
+        - name: PRODUCT_CATALOG_SERVICE_ADDR
+          value: "productcatalogservice:3550"
+        - name: DISABLE_PROFILER
+          value: "1"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 220Mi
+          limits:
+            cpu: 200m
+            memory: 450Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: recommendationservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: recommendationservice
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: recommendationservice
   ports:
-    - name: http
-      port: 5000
-      targetPort: 5000
-      nodePort: 30500
+  - name: grpc
+    port: 8080
+    targetPort: 8080
