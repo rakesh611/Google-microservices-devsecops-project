@@ -1,9 +1,8 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: default
+  namespace: google-microservices        # ✅ FIXED
   labels:
     app: frontend
 spec:
@@ -21,8 +20,11 @@ spec:
         - name: frontend
           image: rakesh6nm/frontend:4
           imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 80
+              name: http
+
           resources:
             requests:
               cpu: "250m"
@@ -31,17 +33,43 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          env:
+            - name: SERVICE_NAME
+              value: "frontend"
+            - name: SERVICE_PORT
+              value: "80"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend-service
-  namespace: default
+  name: frontend
+  namespace: google-microservices        # ✅ FIXED
+  labels:
+    app: frontend
 spec:
   type: NodePort
   selector:
     app: frontend
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 80
-      nodePort: 30095  # NodePort exposed port
+      nodePort: 30095
