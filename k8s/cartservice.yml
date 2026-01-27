@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cartservice
-  namespace: google-microservices          
+  namespace: google-microservices
   labels:
     app: cartservice
 spec:
@@ -56,3 +56,19 @@ spec:
               value: "cartservice"
             - name: SERVICE_PORT
               value: "80"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartservice
+  namespace: google-microservices
+  labels:
+    app: cartservice
+spec:
+  type: ClusterIP
+  selector:
+    app: cartservice
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
