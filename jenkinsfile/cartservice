@@ -1,3 +1,4 @@
+
 // Declare dockerImage globally for reuse
 def dockerImage
 
@@ -20,7 +21,6 @@ pipeline {
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
-        GITOPS_DIR  = "Google-microservices-devsecops-project"
     }
 
     stages {
@@ -66,7 +66,7 @@ pipeline {
         // ================= BUILD & TEST =================
         stage("Build & Test") {
             steps {
-                dir('src/cartservice') {
+                dir('src/cartservice/src') {
                     sh '''
                     dotnet restore
                     dotnet build --no-incremental
@@ -86,8 +86,8 @@ pipeline {
                         trivy fs . \
                           --severity HIGH,CRITICAL \
                           --scanners vuln,misconfig,secret \
-                          --exit-code 1 \
-                          -o trivy-fs-cartservice.txt || true
+                          --exit-code 0 \
+                          -o trivy-fs-cartservice.txt
                         '''
                     }
                 }
@@ -102,7 +102,7 @@ pipeline {
         // ================= DOCKER BUILD =================
         stage("Build Docker Image") {
             steps {
-                dir('src/cartservice') {
+                dir('src/cartservice/src') {
                     script {
                         dockerImage = docker.build("${FULL_IMAGE}")
                         dockerImage.tag("latest")
@@ -146,19 +146,18 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
-                        rm -rf ${GITOPS_DIR}
-                        git clone ${GITOPS_REPO} ${GITOPS_DIR}
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
                         echo "Updating cartservice deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" ${GITOPS_DIR}/k8s/cartservice.yml
-                        cat ${GITOPS_DIR}/k8s/cartservice.yml
+                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/cartservice.yml
 
-                        git -C ${GITOPS_DIR} config user.email "jharakesh485@gmail.com"
-                        git -C ${GITOPS_DIR} config user.name "Rakesh Jha"
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
-                        git -C ${GITOPS_DIR} add k8s/cartservice.yml
-                        git -C ${GITOPS_DIR} commit -m "Deploy cartservice ${IMAGE_TAG}" --allow-empty
-                        git -C ${GITOPS_DIR} push origin main
+                        git -C Google-microservices-devsecops-project add k8s/cartservice.yml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy cartservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
                     """
                 }
             }
@@ -181,19 +180,16 @@ pipeline {
                         <p>Job: ${env.JOB_NAME}</p>
                         <p>Build: #${env.BUILD_NUMBER}</p>
                         <p>Triggered By: ${buildUser}</p>
-                        <p>Docker Image: ${FULL_IMAGE}</p>
                         <p>URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                     """,
                     to: 'jharakesh485@gmail.com',
                     mimeType: 'text/html',
-                    attachmentsPattern: 'src/cartservice/trivy-fs-cartservice.txt,trivy-image-cart.txt,trivy-image-cart.json'
+                    attachmentsPattern: '''
+                        src/cartservice/trivy-fs-cartservice.txt,
+                        trivy-image-cart.txt,
+                        trivy-image-cart.json
+                    '''
                 )
-            }
-        }
-
-        failure {
-            script {
-                echo "Pipeline failed! Check Trivy report or Docker push for issues."
             }
         }
     }
