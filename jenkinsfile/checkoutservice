@@ -48,11 +48,7 @@ pipeline {
                     '''
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/checkoutservice/gosec-report.json'
-                }
-            }
+            post { always { archiveArtifacts 'src/checkoutservice/gosec-report.json' } }
         }
 
         // ================= SONAR =================
@@ -127,11 +123,7 @@ pipeline {
                     }
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/checkoutservice/trivy-fs-report.txt'
-                }
-            }
+            post { always { archiveArtifacts 'src/checkoutservice/trivy-fs-report.txt' } }
         }
 
         // ================= DOCKER BUILD =================
@@ -170,11 +162,7 @@ pipeline {
                     }
                 }
             }
-            post {
-                always {
-                    archiveArtifacts 'src/checkoutservice/trivy-image-checkoutservice.*'
-                }
-            }
+            post { always { archiveArtifacts 'src/checkoutservice/trivy-image-checkoutservice.*' } }
         }
 
         // ================= GITOPS UPDATE =================
@@ -182,12 +170,21 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
+                        # Clean and clone GitOps repo
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        echo "Updating checkoutservice deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/checkoutservice.yml
+                        # Download yq if missing
+                        if [ ! -f yq ]; then
+                            wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                            chmod +x yq
+                        fi
 
+                        echo "Updating checkoutservice deployment image to ${FULL_IMAGE}"
+                        ./yq e -i ".spec.template.spec.containers[0].image = \\"${FULL_IMAGE}\\"" Google-microservices-devsecops-project/k8s/checkoutservice.yml
+                        cat Google-microservices-devsecops-project/k8s/checkoutservice.yml
+
+                        # Git config & commit
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
