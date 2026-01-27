@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: recommendationservice
-  namespace: default
+  namespace: google-microservices        # ✅ FIXED
   labels:
     app: recommendationservice
 spec:
@@ -18,8 +18,12 @@ spec:
       containers:
         - name: recommendationservice
           image: rakesh6nm/recommendationservice:3
+          imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 5000
+              name: http
+
           resources:
             requests:
               cpu: "250m"
@@ -28,17 +32,43 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          env:
+            - name: SERVICE_NAME
+              value: "recommendationservice"
+            - name: SERVICE_PORT
+              value: "5000"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: recommendationservice-nodeport
-  namespace: default
+  name: recommendationservice
+  namespace: google-microservices        # ✅ FIXED
+  labels:
+    app: recommendationservice
 spec:
   type: NodePort
   selector:
     app: recommendationservice
   ports:
-    - port: 5000
+    - name: http
+      port: 5000
       targetPort: 5000
       nodePort: 30500
