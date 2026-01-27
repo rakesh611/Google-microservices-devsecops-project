@@ -1,0 +1,47 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: rakesh6nm/frontend:4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30095  # NodePort exposed port
