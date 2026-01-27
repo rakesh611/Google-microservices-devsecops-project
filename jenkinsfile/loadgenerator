@@ -19,6 +19,7 @@ pipeline {
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
+        gitopsDir = "Google-microservices-devsecops-project"
 
         // pip --user binaries
         PATH = "$PATH:/var/lib/jenkins/.local/bin"
@@ -104,6 +105,7 @@ pipeline {
                         trivy fs . \
                           --severity CRITICAL,HIGH \
                           --scanners vuln,misconfig,secret \
+                          --exit-code 1 \
                           -o trivy-fs-report.txt || true
                     '''
                 }
@@ -137,8 +139,8 @@ pipeline {
             steps {
                 dir('src/loadgenerator') {
                     sh """
-                        trivy image -f json -o trivy-image-loadgenerator.json ${FULL_IMAGE} || true
-                        trivy image -f table -o trivy-image-loadgenerator.txt ${FULL_IMAGE} || true
+                        trivy image -f json  -o trivy-image-loadgenerator.json ${FULL_IMAGE} || true
+                        trivy image -f table -o trivy-image-loadgenerator.txt  ${FULL_IMAGE} || true
                     """
                 }
             }
@@ -149,10 +151,9 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     script {
-                        def gitopsDir = "Google-microservices-devsecops-project"
                         def yamlFile = "${gitopsDir}/k8s/loadgenerator.yml"
 
-                        // Clone repo fresh
+                        // Clone repo
                         sh "rm -rf ${gitopsDir} && git clone ${GITOPS_REPO} ${gitopsDir}"
 
                         // Download yq if not present
@@ -163,17 +164,18 @@ pipeline {
                             fi
                         """
 
-                        // Update YAML image
+                        // Update Docker image in YAML
                         sh """
+                            echo "Updating loadgenerator image to ${FULL_IMAGE}"
                             ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' ${yamlFile}
                             cat ${yamlFile}
                         """
 
-                        // Commit & push changes
+                        // Git commit & push (path relative to repo root)
                         sh """
                             git -C ${gitopsDir} config user.email "jharakesh485@gmail.com"
                             git -C ${gitopsDir} config user.name "Rakesh Jha"
-                            git -C ${gitopsDir} add ${yamlFile}
+                            git -C ${gitopsDir} add k8s/loadgenerator.yml
                             git -C ${gitopsDir} commit -m "Deploy loadgenerator ${IMAGE_TAG}" || echo "No changes to commit"
                             git -C ${gitopsDir} push origin main
                         """
