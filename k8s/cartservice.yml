@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: cartservice
-          image: rakesh6nm/cartservice:40
+          image: rakesh6nm/cartservice:41
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
