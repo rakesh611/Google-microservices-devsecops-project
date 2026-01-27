@@ -33,21 +33,28 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+          # --- Safer probes ---
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health       # ✅ confirm with your app
               port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 15
+              httpHeaders:
+                - name: "Accept"
+                  value: "application/json"
+            initialDelaySeconds: 60  # give app enough startup time
+            periodSeconds: 20
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
 
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health       # ✅ confirm with your app
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
+              httpHeaders:
+                - name: "Accept"
+                  value: "application/json"
+            initialDelaySeconds: 30
+            periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
 
