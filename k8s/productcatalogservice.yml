@@ -2,11 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: productcatalogservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: productcatalogservice
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: productcatalogservice
@@ -15,60 +11,41 @@ spec:
       labels:
         app: productcatalogservice
     spec:
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 5
       containers:
-        - name: productcatalogservice
-          image: rakesh6nm/productcatalogservice:3
-          imagePullPolicy: IfNotPresent
-
-          ports:
-            - containerPort: 3000
-              name: http
-
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 3000
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 3000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          env:
-            - name: SERVICE_NAME
-              value: "productcatalogservice"
-            - name: SERVICE_PORT
-              value: "3000"
+      - name: server
+        image: harishnshetty/productcatalogservice:latest
+        ports:
+        - containerPort: 3550
+        env:
+        - name: PORT
+          value: "3550"
+        - name: DISABLE_PROFILER
+          value: "1"
+        readinessProbe:
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:3550"]
+        livenessProbe:
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:3550"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: productcatalogservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: productcatalogservice
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: productcatalogservice
   ports:
-    - name: http
-      port: 3000
-      targetPort: 3000
-      nodePort: 30300
+  - name: grpc
+    port: 3550
+    targetPort: 3550
