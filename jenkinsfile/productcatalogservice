@@ -1,3 +1,6 @@
+// Declare dockerImage globally
+def dockerImage
+
 pipeline {
     agent any
 
@@ -128,19 +131,20 @@ pipeline {
         stage("Build Docker Image") {
             steps {
                 dir('src/productcatalogservice') {
-                    sh "docker build -t ${FULL_IMAGE} ."
+                    script {
+                        dockerImage = docker.build("${FULL_IMAGE}")
+                        dockerImage.tag("latest")
+                    }
                 }
             }
         }
 
         stage("Push Docker Image") {
             steps {
-                dir('src/productcatalogservice') {
-                    script {
-                        docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
-                            docker.image("${FULL_IMAGE}").push()
-                            docker.image("${FULL_IMAGE}").push('latest')
-                        }
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub1') {
+                        dockerImage.push("${IMAGE_TAG}")
+                        dockerImage.push("latest")
                     }
                 }
             }
@@ -164,16 +168,25 @@ pipeline {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
+                        # Clone GitOps repo
                         rm -rf Google-microservices-devsecops-project
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/productcatalogservice.yml
+                        # Download yq if missing
+                        if [ ! -f yq ]; then
+                            wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                            chmod +x yq
+                        fi
 
+                        # Update the image in deployment YAML
+                        ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' Google-microservices-devsecops-project/k8s/productcatalogservice.yml
+                        cat Google-microservices-devsecops-project/k8s/productcatalogservice.yml
+
+                        # Commit & push
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
-
                         git -C Google-microservices-devsecops-project add k8s/productcatalogservice.yml
-                        git -C Google-microservices-devsecops-project commit -m "Deploy ${IMAGE_NAME} ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project commit -m "Deploy productcatalogservice ${IMAGE_TAG}" --allow-empty
                         git -C Google-microservices-devsecops-project push origin main
                     """
                 }
