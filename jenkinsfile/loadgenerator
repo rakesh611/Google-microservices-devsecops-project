@@ -104,7 +104,6 @@ pipeline {
                         trivy fs . \
                           --severity CRITICAL,HIGH \
                           --scanners vuln,misconfig,secret \
-                          --exit-code 1 \
                           -o trivy-fs-report.txt || true
                     '''
                 }
@@ -138,15 +137,14 @@ pipeline {
             steps {
                 dir('src/loadgenerator') {
                     sh """
-                        trivy image -f json  -o trivy-image-loadgenerator.json ${FULL_IMAGE} || true
-                        trivy image -f table -o trivy-image-loadgenerator.txt  ${FULL_IMAGE} || true
+                        trivy image -f json -o trivy-image-loadgenerator.json ${FULL_IMAGE} || true
+                        trivy image -f table -o trivy-image-loadgenerator.txt ${FULL_IMAGE} || true
                     """
                 }
             }
             post { always { archiveArtifacts 'src/loadgenerator/trivy-image-loadgenerator.*' } }
         }
 
-        // ================= FIXED GITOPS UPDATE =================
         stage("Update GitOps Deployment") {
             steps {
                 sshagent(['gitops_ssh']) {
@@ -154,32 +152,29 @@ pipeline {
                         def gitopsDir = "Google-microservices-devsecops-project"
                         def yamlFile = "${gitopsDir}/k8s/loadgenerator.yml"
 
-                        // Clone repo
+                        // Clone repo fresh
                         sh "rm -rf ${gitopsDir} && git clone ${GITOPS_REPO} ${gitopsDir}"
 
-                        // Download yq locally if not present
+                        // Download yq if not present
                         sh """
                             if [ ! -f yq ]; then
-                                echo "Downloading yq locally..."
                                 wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
                                 chmod +x yq
                             fi
                         """
 
-                        // Update image safely using local yq
+                        // Update YAML image
                         sh """
-                            echo "Updating loadgenerator image to ${FULL_IMAGE}"
                             ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' ${yamlFile}
-                            echo "Updated YAML:"
                             cat ${yamlFile}
                         """
 
-                        // Git commit & push
+                        // Commit & push changes
                         sh """
                             git -C ${gitopsDir} config user.email "jharakesh485@gmail.com"
                             git -C ${gitopsDir} config user.name "Rakesh Jha"
                             git -C ${gitopsDir} add ${yamlFile}
-                            git -C ${gitopsDir} commit -m "Deploy loadgenerator ${IMAGE_TAG}"
+                            git -C ${gitopsDir} commit -m "Deploy loadgenerator ${IMAGE_TAG}" || echo "No changes to commit"
                             git -C ${gitopsDir} push origin main
                         """
                     }
