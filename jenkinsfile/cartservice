@@ -1,4 +1,3 @@
-
 // Declare dockerImage globally for reuse
 def dockerImage
 
@@ -21,6 +20,8 @@ pipeline {
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
+
+        PATH = "$PATH:/var/lib/jenkins/.local/bin"
     }
 
     stages {
@@ -86,8 +87,7 @@ pipeline {
                         trivy fs . \
                           --severity HIGH,CRITICAL \
                           --scanners vuln,misconfig,secret \
-                          --exit-code 0 \
-                          -o trivy-fs-cartservice.txt
+                          -o trivy-fs-cartservice.txt || true
                         '''
                     }
                 }
@@ -127,11 +127,13 @@ pipeline {
         stage("Trivy Image Scan") {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    sh '''
-                    echo "Running Trivy image scan..."
-                    trivy image ${FULL_IMAGE} -f table -o trivy-image-cart.txt || true
-                    trivy image ${FULL_IMAGE} -f json  -o trivy-image-cart.json || true
-                    '''
+                    dir('src/cartservice') {
+                        sh '''
+                        echo "Running Trivy image scan..."
+                        trivy image ${FULL_IMAGE} -f table -o trivy-image-cart.txt || true
+                        trivy image ${FULL_IMAGE} -f json  -o trivy-image-cart.json || true
+                        '''
+                    }
                 }
             }
             post {
@@ -145,20 +147,29 @@ pipeline {
         stage("Update GitOps Deployment") {
             steps {
                 sshagent(['gitops_ssh']) {
-                    sh """
-                        rm -rf Google-microservices-devsecops-project
-                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
+                    script {
+                        sh """
+                            rm -rf Google-microservices-devsecops-project
+                            git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        echo "Updating cartservice deployment image to ${FULL_IMAGE}"
-                        sed -i "s|image: ${DOCKER_USER}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/cartservice.yml
+                            # Download yq if not exists
+                            if [ ! -f yq ]; then
+                                wget -O yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                                chmod +x yq
+                            fi
 
-                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
-                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+                            echo "Updating cartservice deployment image to ${FULL_IMAGE}"
+                            ./yq e -i '.spec.template.spec.containers[0].image = "${FULL_IMAGE}"' Google-microservices-devsecops-project/k8s/cartservice.yml
+                            cat Google-microservices-devsecops-project/k8s/cartservice.yml
 
-                        git -C Google-microservices-devsecops-project add k8s/cartservice.yml
-                        git -C Google-microservices-devsecops-project commit -m "Deploy cartservice ${IMAGE_TAG}" --allow-empty
-                        git -C Google-microservices-devsecops-project push origin main
-                    """
+                            git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                            git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                            git -C Google-microservices-devsecops-project add k8s/cartservice.yml
+                            git -C Google-microservices-devsecops-project commit -m "Deploy cartservice ${IMAGE_TAG}" --allow-empty
+                            git -C Google-microservices-devsecops-project push origin main
+                        """
+                    }
                 }
             }
         }
@@ -184,11 +195,7 @@ pipeline {
                     """,
                     to: 'jharakesh485@gmail.com',
                     mimeType: 'text/html',
-                    attachmentsPattern: '''
-                        src/cartservice/trivy-fs-cartservice.txt,
-                        trivy-image-cart.txt,
-                        trivy-image-cart.json
-                    '''
+                    attachmentsPattern: 'src/cartservice/trivy-fs-cartservice.txt,trivy-image-cart.txt,trivy-image-cart.json'
                 )
             }
         }
