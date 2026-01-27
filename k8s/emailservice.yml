@@ -1,9 +1,8 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: emailservice
-  namespace: default
+  namespace: google-microservices          # ✅ FIXED
   labels:
     app: emailservice
 spec:
@@ -21,8 +20,11 @@ spec:
         - name: emailservice
           image: rakesh6nm/emailservice:17
           imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 80
+              name: http
+
           resources:
             requests:
               cpu: "250m"
@@ -30,3 +32,43 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          env:
+            - name: SERVICE_NAME
+              value: "emailservice"
+            - name: SERVICE_PORT
+              value: "80"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emailservice
+  namespace: google-microservices
+  labels:
+    app: emailservice
+spec:
+  type: ClusterIP
+  selector:
+    app: emailservice
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
