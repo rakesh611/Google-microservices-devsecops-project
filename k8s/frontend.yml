@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: frontend
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: frontend
@@ -22,19 +23,19 @@ spec:
           readinessProbe:
             initialDelaySeconds: 10
             httpGet:
-              path: "/_healthz"
+              path: /_healthz
               port: 8080
               httpHeaders:
-                - name: "Cookie"
-                  value: "shop_session-id=x-readiness-probe"
+                - name: Cookie
+                  value: shop_session-id=x-readiness-probe
           livenessProbe:
             initialDelaySeconds: 10
             httpGet:
-              path: "/_healthz"
+              path: /_healthz
               port: 8080
               httpHeaders:
-                - name: "Cookie"
-                  value: "shop_session-id=x-liveness-probe"
+                - name: Cookie
+                  value: shop_session-id=x-liveness-probe
           env:
             - name: PORT
               value: "8080"
@@ -54,16 +55,8 @@ spec:
               value: "adservice:9555"
             - name: SHOPPING_ASSISTANT_SERVICE_ADDR
               value: "shoppingassistantservice:80"
-            # # ENV_PLATFORM: One of: local, gcp, aws, azure, onprem, alibaba
-            # # When not set, defaults to "local" unless running in GKE, otherwies auto-sets to gcp
-            # - name: ENV_PLATFORM
-            #   value: "aws"
             - name: ENABLE_PROFILER
               value: "0"
-          # - name: CYMBAL_BRANDING
-          #   value: "true"
-          # - name: FRONTEND_MESSAGE
-          #   value: "Replace this with a message you want to display on all pages."
           resources:
             requests:
               cpu: 100m
@@ -71,7 +64,6 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -85,24 +77,3 @@ spec:
       port: 80
       targetPort: 8080
       nodePort: 30101
-  template:
-    spec:
-      containers:
-        - image: rakesh6nm/frontend:6
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend-external
-spec:
-  type: LoadBalancer
-  selector:
-    app: frontend
-  ports:
-    - name: http
-      port: 80
-      targetPort: 8080
-  template:
-    spec:
-      containers:
-        - image: rakesh6nm/frontend:6
