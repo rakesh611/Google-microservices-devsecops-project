@@ -20,11 +20,9 @@ spec:
         - name: adservice
           image: rakesh6nm/adservice:23
           imagePullPolicy: IfNotPresent
-
           ports:
-            - containerPort: 8080
+            - containerPort: 9555
               name: http
-
           resources:
             requests:
               cpu: "100m"
@@ -32,50 +30,38 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-
-          # --- Safer probes ---
           livenessProbe:
             httpGet:
-              path: /health       # ✅ confirm with your app
-              port: 8080
-              httpHeaders:
-                - name: "Accept"
-                  value: "application/json"
-            initialDelaySeconds: 60  # give app enough startup time
+              path: /health
+              port: 9555
+            initialDelaySeconds: 60
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 5
-
           readinessProbe:
             httpGet:
-              path: /health       # ✅ confirm with your app
-              port: 8080
-              httpHeaders:
-                - name: "Accept"
-                  value: "application/json"
+              path: /health
+              port: 9555
             initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
-
           env:
             - name: SERVICE_NAME
               value: "adservice"
             - name: SERVICE_PORT
-              value: "8080"
+              value: "9555"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: adservice
   namespace: google-microservices
-  labels:
-    app: adservice
 spec:
   type: ClusterIP
   selector:
     app: adservice
   ports:
     - name: http
-      port: 8080
-      targetPort: 8080
+      port: 9555
+      targetPort: 9555
