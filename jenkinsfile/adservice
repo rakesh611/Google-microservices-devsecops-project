@@ -80,12 +80,12 @@ pipeline {
                         git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
                         echo "Updating deployment image to ${IMAGE_FULL}:${IMAGE_TAG}"
-                        sed -i "s|image: ${DOCKER_REPO}/${IMAGE_NAME}:.*|image: ${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}|" Google-microservices-devsecops-project/k8s/adservice/deployment.yaml
+                        sed -i "s|image: ${DOCKER_REPO}/${IMAGE_NAME}:.*|image: ${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}|" Google-microservices-devsecops-project/k8s/adservice.yml
 
                         git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
                         git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
 
-                        git -C Google-microservices-devsecops-project add k8s/adservice/deployment.yaml
+                        git -C Google-microservices-devsecops-project add k8s/adservice.yml
                         git -C Google-microservices-devsecops-project commit -m "Deploy adservice ${IMAGE_TAG}" || echo "No changes to commit"
 
                         git -C Google-microservices-devsecops-project push origin main
