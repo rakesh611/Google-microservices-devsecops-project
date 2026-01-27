@@ -19,37 +19,37 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
       containers:
-      - name: server
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - ALL
-          privileged: false
-          readOnlyRootFilesystem: true
-        image: harishnshetty/emailservice:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: PORT
-          value: "8080"
-        - name: DISABLE_PROFILER
-          value: "1"
-        readinessProbe:
-          periodSeconds: 5
-          exec:
-            command: ["/bin/grpc_health_probe", "-addr=:8080"]
-        livenessProbe:
-          periodSeconds: 5
-          exec:
-            command: ["/bin/grpc_health_probe", "-addr=:8080"]
-        resources:
-          requests:
-            cpu: 100m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 128Mi
+        - name: server
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+          image: rakesh6nm/emailservice:19
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DISABLE_PROFILER
+              value: "1"
+          readinessProbe:
+            periodSeconds: 5
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8080"]
+          livenessProbe:
+            periodSeconds: 5
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:8080"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
 ---
 apiVersion: v1
 kind: Service
@@ -60,6 +60,10 @@ spec:
   selector:
     app: emailservice
   ports:
-  - name: grpc
-    port: 5000
-    targetPort: 8080
+    - name: grpc
+      port: 5000
+      targetPort: 8080
+  template:
+    spec:
+      containers:
+        - image: rakesh6nm/emailservice:19
