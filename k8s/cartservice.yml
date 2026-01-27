@@ -2,12 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cartservice
-  namespace: google-microservices
-  labels:
-    app: cartservice
 spec:
-  replicas: 1
-  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app: cartservice
@@ -16,59 +11,42 @@ spec:
       labels:
         app: cartservice
     spec:
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 5
       containers:
-        - name: cartservice
-          image: rakesh6nm/cartservice:41
-          imagePullPolicy: IfNotPresent
-
-          ports:
-            - containerPort: 80
-              name: http
-
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          env:
-            - name: SERVICE_NAME
-              value: "cartservice"
-            - name: SERVICE_PORT
-              value: "80"
+      - name: server
+        image: harishnshetty/cartservice:latest
+        ports:
+        - containerPort: 7070
+        env:
+        - name: REDIS_ADDR
+          value: "redis-cart:6379"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 64Mi
+          limits:
+            cpu: 300m
+            memory: 128Mi
+        readinessProbe:
+          initialDelaySeconds: 15
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:7070", "-rpc-timeout=5s"]
+        livenessProbe:
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:7070", "-rpc-timeout=5s"]
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: cartservice
-  namespace: google-microservices
-  labels:
-    app: cartservice
 spec:
   type: ClusterIP
   selector:
     app: cartservice
   ports:
-    - name: http
-      port: 80
-      targetPort: 80
+  - name: grpc
+    port: 7070
+    targetPort: 7070
