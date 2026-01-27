@@ -13,23 +13,28 @@ pipeline {
         DOCKER_REPO = 'rakesh6nm'
         IMAGE_NAME  = 'adservice'
         IMAGE_TAG   = "${BUILD_NUMBER}"
-        IMAGE_FULL  = "${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
+        FULL_IMAGE  = "${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
 
         // GitOps
         GITOPS_REPO = 'git@github.com:rakesh611/Google-microservices-devsecops-project.git'
-        GITOPS_DIR  = "Google-microservices-devsecops-project"
+
+        // pip / PATH (if needed for Trivy)
+        PATH = "$PATH:/var/lib/jenkins/.local/bin"
     }
 
     stages {
 
+        // ================= CLEAN =================
         stage('Clean Workspace') {
             steps { cleanWs() }
         }
 
+        // ================= SCM CHECKOUT =================
         stage('Checkout SCM') {
             steps { checkout scm }
         }
 
+        // ================= TRIVY FILE SCAN =================
         stage('Trivy FS Scan') {
             steps {
                 dir('src/adservice') {
@@ -49,17 +54,19 @@ pipeline {
             }
         }
 
+        // ================= DOCKER BUILD =================
         stage('Build Docker Image') {
             steps {
                 dir('src/adservice') {
                     script {
-                        dockerImage = docker.build("${IMAGE_FULL}")
+                        dockerImage = docker.build("${FULL_IMAGE}")
                         dockerImage.tag("latest")
                     }
                 }
             }
         }
 
+        // ================= DOCKER PUSH =================
         stage('Push Docker Image') {
             steps {
                 script {
@@ -71,23 +78,47 @@ pipeline {
             }
         }
 
+        // ================= TRIVY IMAGE SCAN =================
+        stage('Trivy Image Scan') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dir('src/adservice') {
+                        sh """
+                        trivy image --severity HIGH,CRITICAL -f table -o trivy-image.txt ${FULL_IMAGE} || true
+                        trivy image --severity HIGH,CRITICAL -f json -o trivy-image.json  ${FULL_IMAGE} || true
+                        """
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'src/adservice/trivy-image.*', allowEmptyArchive: true
+                }
+            }
+        }
+
+        // ================= GITOPS UPDATE =================
         stage('Update GitOps Deployment') {
             steps {
                 sshagent(['gitops_ssh']) {
                     sh """
-                        rm -rf ${GITOPS_DIR}
-                        git clone ${GITOPS_REPO} ${GITOPS_DIR}
+                        rm -rf Google-microservices-devsecops-project
+                        git clone ${GITOPS_REPO} Google-microservices-devsecops-project
 
-                        echo "Updating adservice deployment image to ${IMAGE_FULL}"
-                        sed -i "s|image: ${DOCKER_REPO}/${IMAGE_NAME}:.*|image: ${IMAGE_FULL}|" ${GITOPS_DIR}/k8s/adservice.yml
-                        cat ${GITOPS_DIR}/k8s/adservice.yml
+                        echo "Updating adservice deployment image to ${FULL_IMAGE}"
 
-                        git -C ${GITOPS_DIR} config user.email "jharakesh485@gmail.com"
-                        git -C ${GITOPS_DIR} config user.name "Rakesh Jha"
+                        # Replace any existing image line
+                        sed -i "s|image: .*|image: ${FULL_IMAGE}|" Google-microservices-devsecops-project/k8s/adservice.yml
 
-                        git -C ${GITOPS_DIR} add k8s/adservice.yml
-                        git -C ${GITOPS_DIR} commit -m "Deploy adservice ${IMAGE_TAG}" --allow-empty
-                        git -C ${GITOPS_DIR} push origin main
+                        # Show updated YAML
+                        cat Google-microservices-devsecops-project/k8s/adservice.yml
+
+                        git -C Google-microservices-devsecops-project config user.email "jharakesh485@gmail.com"
+                        git -C Google-microservices-devsecops-project config user.name "Rakesh Jha"
+
+                        git -C Google-microservices-devsecops-project add k8s/adservice.yml
+                        git -C Google-microservices-devsecops-project commit -m "Deploy adservice ${IMAGE_TAG}" --allow-empty
+                        git -C Google-microservices-devsecops-project push origin main
                     """
                 }
             }
@@ -95,27 +126,29 @@ pipeline {
 
     }
 
+    // ================= EMAIL NOTIFICATION =================
     post {
         always {
-            emailext(
-                subject: "Pipeline ${currentBuild.currentResult}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                body: """
-                    <h3>Adservice DevSecOps Pipeline</h3>
-                    <p><b>Status:</b> ${currentBuild.currentResult}</p>
-                    <p><b>Job:</b> ${env.JOB_NAME}</p>
-                    <p><b>Build:</b> ${env.BUILD_NUMBER}</p>
-                    <p><b>Docker Image:</b> ${IMAGE_FULL}</p>
-                    <p><b>URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
-                """,
-                to: 'jharakesh485@gmail.com',
-                mimeType: 'text/html',
-                attachmentsPattern: '**/trivy-fs-report.txt'
-            )
+            script {
+                def buildStatus = currentBuild.currentResult
+                emailext(
+                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                        <p><b>Adservice DevSecOps Pipeline</b></p>
+                        <p>Status: ${buildStatus}</p>
+                        <p>Docker Image: ${FULL_IMAGE}</p>
+                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    """,
+                    to: 'jharakesh485@gmail.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: 'src/adservice/trivy-fs-report.txt,src/adservice/trivy-image.*'
+                )
+            }
         }
 
         failure {
             script {
-                echo "Pipeline failed! Check Trivy report or Docker push for issues."
+                echo "Pipeline failed! Check Trivy reports or Docker push for issues."
             }
         }
     }
