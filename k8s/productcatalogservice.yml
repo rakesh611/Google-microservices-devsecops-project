@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: productcatalogservice
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: productcatalogservice
@@ -49,7 +50,3 @@ spec:
     - name: grpc
       port: 3550
       targetPort: 3550
-  template:
-    spec:
-      containers:
-        - image: rakesh6nm/productcatalogservice:6
