@@ -2,11 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: shippingservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: shippingservice
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: shippingservice
@@ -15,60 +11,41 @@ spec:
       labels:
         app: shippingservice
     spec:
+      serviceAccountName: default
       containers:
-        - name: shippingservice
-          image: rakesh6nm/shippingservice:latest
-          imagePullPolicy: IfNotPresent
-
-          ports:
-            - containerPort: 5005
-              name: http
-
-          resources:
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 5005
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 5005
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          env:
-            - name: SERVICE_NAME
-              value: "shippingservice"
-            - name: SERVICE_PORT
-              value: "5005"
+      - name: server
+        image: harishnshetty/shippingservice:latest
+        ports:
+        - containerPort: 50051
+        env:
+        - name: PORT
+          value: "50051"
+        - name: DISABLE_PROFILER
+          value: "1"
+        readinessProbe:
+          periodSeconds: 5
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:50051"]
+        livenessProbe:
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:50051"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: shippingservice
-  namespace: google-microservices        # ✅ FIXED
-  labels:
-    app: shippingservice
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: shippingservice
   ports:
-    - name: http
-      port: 5005
-      targetPort: 5005
-      nodePort: 30505
+  - name: grpc
+    port: 50051
+    targetPort: 50051
