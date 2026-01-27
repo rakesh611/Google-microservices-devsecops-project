@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: shippingservice
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: shippingservice
@@ -12,6 +13,7 @@ spec:
         app: shippingservice
     spec:
       serviceAccountName: default
+      terminationGracePeriodSeconds: 5
       containers:
         - name: server
           image: rakesh6nm/shippingservice:4
@@ -23,10 +25,13 @@ spec:
             - name: DISABLE_PROFILER
               value: "1"
           readinessProbe:
+            initialDelaySeconds: 10
             periodSeconds: 5
             exec:
               command: ["/bin/grpc_health_probe", "-addr=:50051"]
           livenessProbe:
+            initialDelaySeconds: 10
+            periodSeconds: 5
             exec:
               command: ["/bin/grpc_health_probe", "-addr=:50051"]
           resources:
@@ -49,7 +54,3 @@ spec:
     - name: grpc
       port: 50051
       targetPort: 50051
-  template:
-    spec:
-      containers:
-        - image: rakesh6nm/shippingservice:4
