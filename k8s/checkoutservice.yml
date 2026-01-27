@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: checkoutservice
-  namespace: google-microservices          
+  namespace: google-microservices
   labels:
     app: checkoutservice
 spec:
@@ -56,3 +56,19 @@ spec:
               value: "checkoutservice"
             - name: SERVICE_PORT
               value: "80"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkoutservice
+  namespace: google-microservices
+  labels:
+    app: checkoutservice
+spec:
+  type: ClusterIP
+  selector:
+    app: checkoutservice
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
